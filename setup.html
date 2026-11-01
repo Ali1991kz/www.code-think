@@ -1,0 +1,8 @@
+<!doctype html>
+<html lang="kk"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>CODE THINK · Firebase баптау</title><link rel="stylesheet" href="platform.css"></head>
+<body data-theme="light"><header class="top"><a class="brand" href="index.html">CODE THINK</a><div><button id="kk" type="button">ҚАЗ</button> <button id="ru" type="button">РУС</button></div></header>
+<main style="max-width:850px;margin:auto"><h1 id="title"></h1><p id="intro"></p><div class="note" id="rules"></div>
+<section class="card" style="margin-top:24px"><h2 id="accountTitle"></h2><form id="account"><label class="field"><span id="nameLabel"></span><input id="name" required maxlength="150" autocomplete="name"></label><label class="field"><span id="loginLabel"></span><input id="login" required minlength="3" maxlength="64" autocomplete="username" placeholder="teacher@example.kz"></label><label class="field"><span id="passwordLabel"></span><input id="password" type="password" minlength="12" maxlength="128" required autocomplete="new-password"></label><button id="create" class="primary" type="submit"></button></form></section>
+<section class="card" style="margin-top:24px"><h2 id="materialsTitle"></h2><p id="materialsHint"></p><input id="materials" type="file" accept="application/json,.json"><p><button id="upload" class="primary" type="button"></button></p></section>
+<p id="status" role="status" style="white-space:pre-wrap"></p><p><a class="button" id="open" href="index.html"></a></p></main>
+<script src="config.js"></script><script src="content.js"></script><script src="pedagogy.js"></script><script src="learning-core.js"></script><script src="firebase-direct.js"></script><script src="setup.js"></script></body></html>
