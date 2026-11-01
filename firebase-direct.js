@@ -178,9 +178,13 @@
    await commit(writesFor(state,core),tx);return result;
   }catch(e){throw e;}
  }
- async function createAccount(cacheKey,grade){
-  if(pendingAccounts.has(cacheKey))return pendingAccounts.get(cacheKey);
-  const login='s'+grade+'-'+random().slice(0,14),pw=password();
+ async function createAccount(cacheKey,grade,requestedLogin=''){
+  if(pendingAccounts.has(cacheKey)){
+   const item=pendingAccounts.get(cacheKey);
+   if(requestedLogin&&item.login!==requestedLogin)throw Error('Логин өзгерді. Тіркеуді қайта бастаңыз. / Логин изменён. Повторите регистрацию.');
+   return item;
+  }
+  const login=requestedLogin||'s'+grade+'-'+random().slice(0,14),pw=password();
   const r=await auth('signUp',{email:alias(login),password:pw,returnSecureToken:true});
   const item={login,temporaryPassword:pw,authUid:r.localId,discardToken:r.idToken};pendingAccounts.set(cacheKey,item);return item;
  }
@@ -188,15 +192,21 @@
  async function importOne(row,job){
   const name=String(row.name||'').trim(),grade=String(row.grade||''),className=String(row.className||'').trim();
   if(!name||name.length>150||!className||className.length>40||!['7','8'].includes(grade))throw Error('Аты-жөні, 7/8 деңгейі және сынып атауы қажет. / Нужны ФИО, параллель 7/8 и класс.');
+  const customLogin=Object.hasOwn(row,'login'),requestedLogin=customLogin?norm(row.login):'';
+  if(customLogin&&!/^[a-z0-9][a-z0-9._-]{2,31}$/.test(requestedLogin))throw Error('Логин: 3–32 таңба, латын әріптері, сандар, нүкте, _ немесе -. / Логин: 3–32 символа, латинские буквы, цифры, точка, _ или -.');
+  if(customLogin&&(requestedLogin.includes('..')||requestedLogin.endsWith('.')))throw Error('Логин нүктемен аяқталмасын және нүктелер қатар келмесін. / Логин не должен заканчиваться точкой или содержать две точки подряд.');
   const marker='import_'+job+'_'+String(row.row||1),markerPath=path('RegistrationJobs',marker);
   const processed=await getDoc(markerPath);if(processed)return {alreadyProcessed:true,row:row.row,name,ok:true};
-  const account=await createAccount(marker,grade);account.cacheKey=marker;
   let tx;
   try{
    tx={optimistic:true};
    const state=await load(['Users','Classes','ClassStudents','Assignments','Tasks'],tx);
    const inTx=await getDoc(markerPath,tx);if(inTx)return {alreadyProcessed:true,row:row.row,name,ok:true};
-   if(state.tables.Users.some(u=>u.role==='student'&&norm(u.name)===norm(name)&&norm(u.className)===norm(className))){await discard(account);throw Error('Бұл оқушы сыныпта бар. / Ученик уже есть в классе.');}
+   if(state.tables.Users.some(u=>u.role==='student'&&norm(u.name)===norm(name)&&norm(u.className)===norm(className)))throw Error('Бұл оқушы сыныпта бар. / Ученик уже есть в классе.');
+   if(requestedLogin&&state.tables.Users.some(u=>norm(u.login)===requestedLogin))throw Error('Бұл логин тіркелген. Басқа логин таңдаңыз. / Этот логин уже зарегистрирован. Выберите другой.');
+   const cls=state.tables.Classes.find(c=>norm(c.name)===norm(className));
+   if(cls&&String(cls.grade)!==grade)throw Error('Сынып атауы басқа деңгеймен тіркелген. / Класс зарегистрирован для другой параллели.');
+   const account=await createAccount(marker,grade,requestedLogin);account.cacheKey=marker;
    const userId='USR-'+random(),u={id:userId,login:account.login,authUid:account.authUid,name,grade,className,role:'student',active:true,mustChangePassword:true,createdAt:new Date().toISOString(),lastLoginAt:''};
    const core=window.CT_CORE.create(state.tables,profile);core.enroll(profile,u);
    const writes=writesFor(state,core);
@@ -267,7 +277,7 @@
  }
  async function dispatch(action,p={}){
   if(!project||!key)throw Error('Firebase config.js баптауларын толтырыңыз. / Заполните Firebase config.js.');
-  if(action==='ping')return {version:'11.0.1',backend:'firebase-direct',plan:'Spark'};
+  if(action==='ping')return {version:'11.0.2',backend:'firebase-direct',plan:'Spark',customStudentLogins:true};
   if(action==='logout'){clear();return {loggedOut:true};}
   if(action==='setupTeacher')return setupTeacher(p);
   if(action==='login'){
@@ -286,5 +296,5 @@
   if(action==='installMaterials')return installMaterials(p);
   return learning(action,p);
  }
- window.CT_FIREBASE={call(action,p={}){const task=queue.then(()=>dispatch(action,p));queue=task.catch(()=>{});return task.catch(e=>{throw friendly(e);});},invalidate:()=>readCache.clear(),status:()=>({signedIn:!!session,project,version:'11.0.1'}),_test:local?{val,plain,rowKey,decode,root}:undefined};
+ window.CT_FIREBASE={call(action,p={}){const task=queue.then(()=>dispatch(action,p));queue=task.catch(()=>{});return task.catch(e=>{throw friendly(e);});},invalidate:()=>readCache.clear(),status:()=>({signedIn:!!session,project,version:'11.0.2',customStudentLogins:true}),_test:local?{val,plain,rowKey,decode,root}:undefined};
 })();
