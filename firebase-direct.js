@@ -12,7 +12,7 @@
  const alias=login=>norm(login).includes('@')?norm(login):norm(login)+'@code-think.invalid';
  const random=()=>crypto.randomUUID().replaceAll('-','');
  const password=()=>'Ct!'+random().slice(0,18)+'7aA';
- let session=null,identity=null,profile=null,queue=Promise.resolve(),refreshing=null;
+ let session=null,identity=null,profile=null,profileDocument=null,queue=Promise.resolve(),refreshing=null;
  const pendingAccounts=new Map(); // Plaintext temporary credentials never go into Firestore or localStorage.
  const readCache=new Map();
  try{session=JSON.parse(sessionStorage.getItem(SESSION)||'null');}catch{sessionStorage.removeItem(SESSION);}
@@ -32,7 +32,7 @@
   ABORTED:'Деректер басқа терезеде өзгерді. Бетті жаңартып қайталаңыз. / Данные изменились в другом окне. Обновите страницу и повторите.',
   FAILED_PRECONDITION:'Деректер өзгерді. Бетті жаңартып қайталаңыз. / Данные изменились. Обновите страницу и повторите.'
  };
- function friendly(e){const raw=String(e?.message||e||'');const code=raw.split(' : ')[0].split(':')[0];return Error(messages[code]||raw);}
+ function friendly(e){const raw=String(e?.message||e||'');const code=e?.code||raw.split(' : ')[0].split(':')[0];const error=Error(messages[code]||raw);error.code=code;return error;}
  async function request(url,body,token,method='POST',form=false){
   const ctl=new AbortController(),timer=setTimeout(()=>ctl.abort(),45000);
   try{
@@ -49,7 +49,7 @@
   if(!refreshing)refreshing=request(refreshBase+'?key='+key,'grant_type=refresh_token&refresh_token='+encodeURIComponent(session.refreshToken),null,'POST',true).then(r=>{storeSession(r);return session.idToken;}).catch(e=>{clear();throw e;}).finally(()=>refreshing=null);
   return refreshing;
  }
- function clear(){session=null;identity=null;profile=null;pendingAccounts.clear();readCache.clear();sessionStorage.removeItem(SESSION);sessionStorage.removeItem('ct11-token');}
+ function clear(){session=null;identity=null;profile=null;profileDocument=null;pendingAccounts.clear();readCache.clear();sessionStorage.removeItem(SESSION);sessionStorage.removeItem('ct11-token');}
  async function fs(path,body,method='POST'){return request(storeBase+path,body,await token(),method);}
  const val=v=>{
   if(v===null)return {nullValue:null};if(typeof v==='boolean')return {booleanValue:v};
@@ -62,12 +62,11 @@
  function decode(doc){return Object.assign(Object.fromEntries(Object.entries(doc.fields||{}).map(([k,v])=>[k,plain(v)])),{__localKey:doc.name.split('/').pop()});}
  const path=(table,id,sid=identity?.schoolId)=>`${root}/schools/${sid}/${table}/${id}`;
  async function getDoc(name,tx){
-  if(tx){const rows=await fs(root+':batchGet',{documents:[name],transaction:tx});return rows.find(x=>x.found)?.found||null;}
   try{return await fs(name,undefined,'GET');}catch(e){if(e.status===404)return null;throw e;}
  }
  async function current(){
   await token();const d=await getDoc(`${root}/identities/${session.uid}`);if(!d)throw Error('Аккаунт платформада дайындалмаған. Мұғалімге хабарласыңыз. / Аккаунт не подготовлен. Обратитесь к учителю.');
-  identity=decode(d);const p=await getDoc(path('Users',identity.userId));if(!p)throw Error('Аккаунт табылмады. / Аккаунт не найден.');profile=decode(p);
+  identity=decode(d);const p=await getDoc(path('Users',identity.userId));if(!p)throw Error('Аккаунт табылмады. / Аккаунт не найден.');profileDocument=p;profile=decode(p);
   if(profile.authUid!==session.uid||String(profile.active)!=='true')throw Error('Аккаунт қолжетімсіз. Мұғалімге хабарласыңыз. / Аккаунт недоступен. Обратитесь к учителю.');
   return profile;
  }
@@ -99,7 +98,7 @@
     const hit=canCache&&readCache.get(cacheKey);
     if(hit&&hit.expiresAt>Date.now()){docs=copy(hit.docs);}
     else{
-    const body={structuredQuery};if(tx)body.transaction=tx;
+    const body={structuredQuery};
     const rows=await fs(`${root}/schools/${identity.schoolId}:runQuery`,body);docs=rows.filter(r=>r.document).map(r=>r.document);
     if(canCache)readCache.set(cacheKey,{docs:copy(docs),expiresAt:Date.now()+30000});
     }
@@ -144,15 +143,32 @@
   return writes;
  }
  async function commit(writes,tx){
-  if(writes.length>400)throw Error('Жазбалар көп. Әрекетті кішірек топпен қайталаңыз. / Слишком много записей. Повторите меньшей группой.');
-  if(writes.length){await fs(root+':commit',{writes,...(tx?{transaction:tx}:{})});readCache.clear();}else if(tx)await fs(root+':rollback',{transaction:tx});
+  if(!writes.length)return;
+  const batch=writes.slice();
+  // Firebase Auth clients use atomic commits with version preconditions.
+  // The actor's existing profile is a compare-and-set guard: another tab cannot
+  // save a mutation based on the same stale read. Rules already allow updating
+  // only __updatedAt on one's own profile; no permission changes are needed.
+  const guard=profileDocument&&profileDocument.name===path('Users',profile?.id)?profileDocument:null;
+  if(guard&&!batch.some(w=>w.update?.name===guard.name||w.delete===guard.name)){
+   batch.push({update:{name:guard.name,fields:copy(guard.fields)},currentDocument:{updateTime:guard.updateTime},updateTransforms:[{fieldPath:'__updatedAt',setToServerValue:'REQUEST_TIME'}]});
+  }
+  if(batch.length>400)throw Error('Жазбалар көп. Әрекетті кішірек топпен қайталаңыз. / Слишком много записей. Повторите меньшей группой.');
+  const result=await fs(root+':commit',{writes:batch});readCache.clear();
+  const name=identity&&profile?path('Users',profile.id):null,index=batch.findIndex(w=>w.update?.name===name);
+  if(index>=0){
+   const write=batch[index],saved=result.writeResults[index];
+   profileDocument={...copy(write.update),updateTime:saved.updateTime};
+   (write.updateTransforms||[]).forEach((tr,i)=>{profileDocument.fields[tr.fieldPath]=saved.transformResults[i];});
+   profile=decode(profileDocument);
+  }
  }
  const readOnly=new Set(['me','teacherDashboard','studentWorkspace','pedagogyWorkspace','correctionWorkspace','teacherSolution','getTaskTests','checkTaskOutputs']);
  async function learning(action,p){
   const names=window.CT_CORE.dependencies[action];if(!names)throw Error('Әрекет табылмады. / Действие не найдено.');
   let tx;
   try{
-   if(!readOnly.has(action))tx=(await fs(root+':beginTransaction',{options:{readWrite:{}}})).transaction;
+   if(!readOnly.has(action))tx={optimistic:true};
    const state=await load(names,tx,p,action),u=state.tables.Users.find(x=>x.id===profile.id)||profile;
    let materials=[];
    if(['teacherSolution','getTaskTests','checkTaskOutputs'].includes(action)){
@@ -160,7 +176,7 @@
    }
    const core=window.CT_CORE.create(state.tables,u,p,materials),result=core.run(action);
    await commit(writesFor(state,core),tx);return result;
-  }catch(e){if(tx)try{await fs(root+':rollback',{transaction:tx});}catch{}throw e;}
+  }catch(e){throw e;}
  }
  async function createAccount(cacheKey,grade){
   if(pendingAccounts.has(cacheKey))return pendingAccounts.get(cacheKey);
@@ -177,9 +193,9 @@
   const account=await createAccount(marker,grade);account.cacheKey=marker;
   let tx;
   try{
-   tx=(await fs(root+':beginTransaction',{options:{readWrite:{}}})).transaction;
+   tx={optimistic:true};
    const state=await load(['Users','Classes','ClassStudents','Assignments','Tasks'],tx);
-   const inTx=await getDoc(markerPath,tx);if(inTx){await fs(root+':rollback',{transaction:tx});return {alreadyProcessed:true,row:row.row,name,ok:true};}
+   const inTx=await getDoc(markerPath,tx);if(inTx)return {alreadyProcessed:true,row:row.row,name,ok:true};
    if(state.tables.Users.some(u=>u.role==='student'&&norm(u.name)===norm(name)&&norm(u.className)===norm(className))){await discard(account);throw Error('Бұл оқушы сыныпта бар. / Ученик уже есть в классе.');}
    const userId='USR-'+random(),u={id:userId,login:account.login,authUid:account.authUid,name,grade,className,role:'student',active:true,mustChangePassword:true,createdAt:new Date().toISOString(),lastLoginAt:''};
    const core=window.CT_CORE.create(state.tables,profile);core.enroll(profile,u);
@@ -188,7 +204,7 @@
    writes.push(documentWrite(markerPath,{id:marker,userId},null));
    await commit(writes,tx);pendingAccounts.delete(marker);
    return {ok:true,row:row.row,name,grade,className,userId,login:account.login,temporaryPassword:account.temporaryPassword};
-  }catch(e){if(tx)try{await fs(root+':rollback',{transaction:tx});}catch{}throw e;}
+  }catch(e){throw e;}
  }
  async function importStudents(p){
   if(!Array.isArray(p.students)||!p.students.length||p.students.length>20||!/^[-a-zA-Z0-9_]{8,100}$/.test(p.requestId||''))throw Error('Импорт сұрауын жаңартыңыз. / Повторите запрос импорта.');
@@ -251,7 +267,7 @@
  }
  async function dispatch(action,p={}){
   if(!project||!key)throw Error('Firebase config.js баптауларын толтырыңыз. / Заполните Firebase config.js.');
-  if(action==='ping')return {version:'11.0',backend:'firebase-direct',plan:'Spark'};
+  if(action==='ping')return {version:'11.0.1',backend:'firebase-direct',plan:'Spark'};
   if(action==='logout'){clear();return {loggedOut:true};}
   if(action==='setupTeacher')return setupTeacher(p);
   if(action==='login'){
@@ -270,5 +286,5 @@
   if(action==='installMaterials')return installMaterials(p);
   return learning(action,p);
  }
- window.CT_FIREBASE={call(action,p={}){const task=queue.then(()=>dispatch(action,p));queue=task.catch(()=>{});return task.catch(e=>{throw friendly(e);});},invalidate:()=>readCache.clear(),status:()=>({signedIn:!!session,project}),_test:local?{val,plain,rowKey,decode,root}:undefined};
+ window.CT_FIREBASE={call(action,p={}){const task=queue.then(()=>dispatch(action,p));queue=task.catch(()=>{});return task.catch(e=>{throw friendly(e);});},invalidate:()=>readCache.clear(),status:()=>({signedIn:!!session,project,version:'11.0.1'}),_test:local?{val,plain,rowKey,decode,root}:undefined};
 })();
