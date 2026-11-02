@@ -5,3 +5,9 @@
 .grade-context{margin:12px 0;padding:8px 0;color:var(--muted);font-size:14px}.teacher-filters{display:flex;flex-wrap:wrap;align-items:end;gap:12px;margin:18px 0}.teacher-filters label{display:grid;gap:6px;font-size:13px}.teacher-filters input,.teacher-filters select{padding:10px;border:1px solid var(--border);border-radius:9px;background:var(--surface);color:var(--text);max-width:100%}.backup-entry{margin:24px 0}
 .code-editor-help{font-size:12px;color:var(--muted);margin:6px 0 12px}.inline-visual-pane{scroll-margin-top:15px}
 @media(max-width:700px){.save-state{padding:9px 15px;font-size:12px}.teacher-filters{display:grid;grid-template-columns:1fr}.readiness-items button{font-size:12px}.readiness{padding:14px}.backup-entry button{max-width:100%;white-space:normal}}
+
+.task-contract{border-top:1px solid #d6e1ef;margin-top:1.2rem;padding-top:1rem}
+.task-contract dl{margin:1rem 0}.task-contract dt{font-weight:650;margin-top:.8rem}.task-contract dd{margin:.3rem 0 0;overflow-wrap:anywhere}
+.task-contract details{margin-top:.8rem}.task-contract summary{cursor:pointer;padding:.5rem 0;font-weight:600}
+.example-pair{display:grid;grid-template-columns:1fr 1fr;gap:1rem;margin:.8rem 0}.example-pair>div{min-width:0}.example-pair pre{white-space:pre-wrap;overflow-wrap:anywhere;padding:.8rem;background:var(--bg,#f0f5fb);border:1px solid #d6e1ef;border-radius:10px;color:inherit;max-height:20rem;overflow:auto}
+@media(max-width:600px){.example-pair{grid-template-columns:1fr}}

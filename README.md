@@ -1,19 +1,26 @@
-# CODE THINK 11.1.0
+# CODE THINK 11.2.0
 
-Static Python learning platform for grades 7–8. GitHub Pages serves these site files;
-Firebase Authentication and Cloud Firestore store accounts and learning progress.
-No Apps Script, Sheets, Cloud Functions, billing upgrade or administrator key is needed.
+Static Python learning platform: 31 tasks, grades 7–8 (19/12), Kazakh and Russian.
+GitHub Pages hosts the site. Firebase Auth and Firestore store accounts/progress.
+Firebase Spark remains supported; no Apps Script, Cloud Functions or paid upgrade.
 
-## Update an existing installation
+## 11.2 pedagogical revision
 
-Publish the matching `firestore.rules` in Firebase Console, then publish the updated
-site files. Keep the existing project configuration, accounts and teacher approval.
-Do not run setup again for an existing teacher. The 31 tasks and flowchart engine
-are retained. Detailed changes are listed in `UPDATE_11_1_KK.txt` in the full archive.
+All 31 tasks have explicit inputs, outputs, a collapsible I/O example, contextual
+purpose, boundary-test suggestions, and task-specific reasoning prompts. The
+recommended order respects prerequisites within each grade. Earlier-grade
+knowledge is explicitly identified rather than unlocking another grade's tasks.
+Examples are public learning aids, not reference solutions or the full private test set.
 
-The teacher can export grades and a JSON learning-data backup. Restore adds missing
-records only within the same project and school; it does not recreate Firebase
-Authentication accounts or passwords and does not overwrite current records.
+Existing school tasks are displayed through their stable sourceKey and the updated
+bundled wording. No Firebase migration, rule publication or teacher setup is needed.
+Existing attempts and grades are preserved. Runner, trace engine, flowcharts,
+diagnostic content and private reference programs/test cases are unchanged.
 
-Only the SITE files belong in the public website. Never publish TEACHER_SETUP,
-CHECKS, exported backups, credentials or pupil result files.
+The teacher Pedagogy tab links to `ped-idea-demo.html`, an account-free bilingual
+presentation demonstration. Its arithmetic demonstration stores no learning data
+and is separate from the main Python runner. Budget comparison is an optional
+extension of the discount task, not a new core requirement.
+
+Publish SITE files only. Never publish TEACHER_SETUP, CHECKS, pupil exports,
+credentials or backups. See UPDATE_11_2_KK.txt in the full package.
