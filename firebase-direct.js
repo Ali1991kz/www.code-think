@@ -7,7 +7,7 @@
  const SESSION='ct11-firebase-session',copy=x=>JSON.parse(JSON.stringify(x));
  const SHARED=new Set(['Classes','Tasks','Assignments','Settings']);
  const EMPTY=new Set(['Sessions']);
- const teacherOnly=new Set(['importStudents','bulkManageStudents','setupTeacher','installMaterials','unlockTemporaryPasswords','getTemporaryPasswords']);
+ const teacherOnly=new Set(['importStudents','bulkManageStudents','setupTeacher','installMaterials','unlockTemporaryPasswords','getTemporaryPasswords','teacherProfile','saveTeacherProfile','teacherReviewWorkspace','previewPurgeStudents','purgeStudents']);
  const norm=s=>String(s||'').trim().toLowerCase();
  const alias=login=>norm(login).includes('@')?norm(login):norm(login)+'@code-think.invalid';
  const random=()=>crypto.randomUUID().replaceAll('-','');
@@ -287,6 +287,59 @@
   await commit(writes);for(const {a}of replacements)for(const [k,v]of pendingAccounts)if(v===a)pendingAccounts.delete(k);
   return {updated:users.length,operation:p.operation,credentials};
  }
+ async function queryDocuments(table,filters=[],global=false){
+  const eq=([field,value])=>({fieldFilter:{field:{fieldPath:field},op:'EQUAL',value:val(value)}}),clauses=filters.map(eq),q={from:[{collectionId:table}]};
+  if(clauses.length)q.where=clauses.length===1?clauses[0]:{compositeFilter:{op:'AND',filters:clauses}};
+  const parent=global?root:root+'/schools/'+identity.schoolId;
+  return (await fs(parent+':runQuery',{structuredQuery:q})).filter(x=>x.document).map(x=>x.document);
+ }
+ function requireTeacher(){if(profile.role!=='teacher')throw Error('Мұғалім құқығы қажет. / Нужны права учителя.');}
+ async function teacherProfile(){requireTeacher();const d=await getDoc(path('TeacherProfiles',profile.id));return {user:window.CT_CORE.create({},profile).publicUser(profile),preferences:d?decode(d):{avatar:'owl',subject:'Информатика',bio:''}};}
+ async function saveTeacherProfile(p){
+  requireTeacher();const name=String(p.name||'').trim(),subject=String(p.subject||'').trim(),bio=String(p.bio||'').trim();
+  if(!name||name.length>150||!subject||subject.length>80||bio.length>500||!avatars.has(p.avatar))throw Error('Аты-жөні, пән және аватарды тексеріңіз. / Проверьте ФИО, предмет и аватар.');
+  const n=path('TeacherProfiles',profile.id),old=await getDoc(n),uName=path('Users',profile.id),u=await getDoc(uName);
+  await commit([documentWrite(n,{id:profile.id,teacherId:profile.id,avatar:p.avatar,subject,bio},old),documentWrite(uName,{...clean('Users',decode(u),{}),name},u)]);return teacherProfile();
+ }
+ async function teacherReviewWorkspace(p){
+  requireTeacher();const id=String(p.attemptId||'');if(!id||id.includes('/'))throw Error('Жұмысты таңдаңыз. / Выберите работу.');
+  const d=await getDoc(path('TaskAttempts',id));if(!d)throw Error('Жұмыс табылмады. / Работа не найдена.');const at=decode(d);
+  const [ud,ad]=await Promise.all([getDoc(path('Users',at.userId)),getDoc(path('Assignments',at.assignmentId))]);
+  if(!ud||!ad||decode(ud).deletedAt)throw Error('Алдымен оқушыны архивтен қайтарыңыз. / Сначала восстановите ученика из архива.');
+  const a=decode(ad),td=await getDoc(path('Tasks',a.taskId));
+  const [ss,ee,cc]=await Promise.all([queryDocuments('TaskSteps',[['attemptId',id]]),queryDocuments('LearningEvidence',[['attemptId',id]]),queryDocuments('Corrections',[['sourceId',id]])]);
+  return {attempt:at,assignment:a,task:td?decode(td):{},student:window.CT_CORE.create({},profile).publicUser(decode(ud)),steps:ss.map(decode),evidence:ee.map(decode),corrections:cc.map(decode).filter(c=>c.userId===at.userId&&c.kind==='task')};
+ }
+ const purgeTables=['ClassStudents','Attempts','Answers','DiagnosticProfiles','MethodProgress','TaskAttempts','TaskSteps','SkillScores','Events','Corrections','LearningEvidence','TransferProbes','StudentProfiles','RegistrationJobs'];
+ async function purgeDocuments(userId){
+  const groups=await Promise.all(purgeTables.map(async table=>({table,docs:await queryDocuments(table,[[['Answers','TaskSteps','LearningEvidence'].includes(table)?'__ownerId':'userId',userId]])})));
+  for(const table of ['identities','loginRoutes','LoginHandoffs'])groups.push({table,docs:await queryDocuments(table,[['schoolId',identity.schoolId],['userId',userId]],true)});
+  return groups;
+ }
+ async function purgeCandidate(userId){
+  if(!/^USR-[a-zA-Z0-9_-]+$/.test(userId))throw Error('Оқушыны таңдаңыз. / Выберите ученика.');
+  const u=await getDoc(path('Users',userId)),job=await getDoc(path('PurgeJobs',userId));
+  if(u){const r=decode(u);if(r.role!=='student'||r.active!==false||!r.deletedAt)throw Error('Біржола жою тек архивтегі оқушыға арналған. / Безвозвратное удаление доступно только для ученика в архиве.');}
+  else if(!job)throw Error('Оқушы табылмады. / Ученик не найден.');
+  return {u,job};
+ }
+ async function previewPurgeStudents(p){
+  requireTeacher();const ids=[...new Set(p.userIds||[])];if(!ids.length||ids.length>10)throw Error('1–10 оқушы таңдаңыз. / Выберите 1–10 учеников.');const rows=[];
+  for(const id of ids){const {u,job}=await purgeCandidate(id);if(job&&decode(job).status==='done'){rows.push({id,completed:true,total:0,counts:{},authAccountIds:[]});continue;}const groups=await purgeDocuments(id),r=u?decode(u):{};
+   rows.push({id,name:r.name||'',login:r.login||'',className:r.className||'',total:groups.reduce((n,g)=>n+g.docs.length,0)+(u?1:0),counts:Object.fromEntries(groups.map(g=>[g.table,g.docs.length])),authAccountIds:[...new Set([r.authUid,...groups.find(g=>g.table==='identities').docs.map(d=>d.name.split('/').at(-1))].filter(Boolean))]});
+  }return {rows};
+ }
+ async function purgeStudents(p){
+  requireTeacher();if(p.confirmation!=='DELETE_PLATFORM_DATA')throw Error('Жоюды растаңыз. / Подтвердите удаление.');const ids=[...new Set(p.userIds||[])];if(!ids.length||ids.length>10)throw Error('1–10 оқушы таңдаңыз. / Выберите 1–10 учеников.');let completed=0,deleted=0;
+  for(const id of ids){let {u,job}=await purgeCandidate(id);const jobName=path('PurgeJobs',id);if(job&&decode(job).status==='done'){completed++;continue;}
+   if(!job){const tombName=path('DeletedPupils',id);await commit([documentWrite(tombName,{id,userId:id},null),documentWrite(jobName,{id,userId:id,status:'deleting',deletedCount:1},null),{delete:u.name,currentDocument:{updateTime:u.updateTime}}]);}
+   const groups=await purgeDocuments(id),docs=groups.flatMap(g=>g.docs);let total=0;
+   for(let i=0;i<docs.length;i+=200){job=await getDoc(jobName);const count=Number(decode(job).deletedCount)||0,chunk=docs.slice(i,i+200),writes=chunk.map(d=>({delete:d.name,currentDocument:{updateTime:d.updateTime}}));writes.push(documentWrite(jobName,{id,userId:id,status:'deleting',deletedCount:count+chunk.length},job));await commit(writes);total+=chunk.length;}
+   const remaining=await purgeDocuments(id);if(remaining.some(g=>g.docs.length))throw Error('Жою аяқталмады. «Жоюды жалғастыру» басыңыз. / Удаление не завершено. Нажмите «Продолжить удаление».');
+   job=await getDoc(jobName);await commit([documentWrite(jobName,{id,userId:id,status:'done',deletedCount:Number(decode(job).deletedCount)||0},job)]);completed++;deleted+=total;
+  }return {completed,deleted,authAccountsDeleted:false};
+ }
+
  // Profile preferences contain no grades, XP or credentials.
  const avatars=new Set(['robot','rocket','owl','cat','turtle','star']);
  function requirePupil(){if(profile.role!=='student'||profile.mustChangePassword)throw Error('Оқушы аккаунты қажет. / Нужен аккаунт ученика.');}
@@ -369,15 +422,16 @@
  async function schoolWorkspace(p){
   const teacher=profile.role==='teacher',view=String(p.view||'overview');
   let names=teacher?['Users','Classes','ClassStudents','Tasks','Assignments','Attempts','TaskAttempts','Settings','SkillScores']:['Users','Classes','ClassStudents','Tasks','Assignments','Attempts','Answers','TaskAttempts','TaskSteps','Settings','SkillScores','DiagnosticProfiles','MethodProgress','Corrections','TransferProbes'];
+  if(teacher&&view==='overview')names.push('Corrections');
   if(teacher&&view==='diagnostics')names.push('Answers','DiagnosticProfiles');
-  if(teacher&&view==='work')names.push('TaskSteps');
+  if(teacher&&['work','overview','thinking','review'].includes(view))names.push('TaskSteps');
   if(teacher&&view==='corrections')names.push('Corrections','Answers','TaskSteps');
   if((teacher&&view==='pedagogy')||(!teacher&&['task','transfer','probe','results','profile'].includes(view)))names.push('LearningEvidence','TransferProbes','PedagogyReviews');
   const state=await load(names,null,p,'schoolWorkspace');
   const core=window.CT_CORE.create(state.tables,profile);
   const result=teacher?{dashboard:core.run('teacherDashboard'),teacherWS:core.run('teacherWorkspace'),corrections:core.run('correctionWorkspace')}:{mine:core.run('me'),workspace:core.run('studentWorkspace'),corrections:core.run('correctionWorkspace')};
   result.ped=(names.includes('LearningEvidence')||names.includes('TransferProbes'))?core.run('pedagogyWorkspace'):{evidence:[],probes:[],reviews:[]};
-  await commit(writesFor(state,core));if(!teacher)result.studentProfile=await studentProfile();if(teacher&&view==='students')result.temporaryPasswords=await temporaryPasswords(state.tables.Users);return result;
+  await commit(writesFor(state,core));if(!teacher)result.studentProfile=await studentProfile();else result.teacherProfile=await teacherProfile();if(teacher&&view==='students'){result.temporaryPasswords=await temporaryPasswords(state.tables.Users);result.purgeJobs=(await queryDocuments('PurgeJobs',[['status','deleting']])).map(decode);}return result;
  }
  const backupTables=[...Object.keys(window.CT_CORE.schemas).filter(n=>n!=='Sessions'),'TeacherSolutions','TaskChecks'];
  async function exportBackup(){
@@ -424,7 +478,7 @@
 
  async function dispatch(action,p={}){
   if(!project||!key)throw Error('Firebase config.js баптауларын толтырыңыз. / Заполните Firebase config.js.');
-  if(action==='ping')return {version:'11.5.0',backend:'firebase-direct',plan:'Spark',customStudentLogins:true};
+  if(action==='ping')return {version:'11.6.0',backend:'firebase-direct',plan:'Spark',customStudentLogins:true};
   if(action==='logout'){clear();return {loggedOut:true};}
   if(action==='setupTeacher'){const r=await setupTeacher(p);if(!r.needsApproval&&profile?.role==='teacher')await vault.unlock(profile,String(p.password));return r;}
   if(action==='login'){
@@ -445,12 +499,23 @@
   if(action==='restoreBackup')return restoreBackup(p);
   if(action==='importStudents')return importStudents(p);
   if(action==='bulkManageStudents')return bulk(p);
+  if(action==='teacherProfile')return teacherProfile();
+  if(action==='saveTeacherProfile')return saveTeacherProfile(p);
+  if(action==='teacherReviewWorkspace')return teacherReviewWorkspace(p);
+  if(action==='previewPurgeStudents')return previewPurgeStudents(p);
+  if(action==='purgeStudents')return purgeStudents(p);
   if(action==='changePassword')return changePassword(p);
   if(action==='changeStudentLogin')return changeStudentLogin(p);
   if(action==='studentProfile')return studentProfile();
   if(action==='saveStudentProfile')return saveStudentProfile(p);
   if(action==='installMaterials')return installMaterials(p);
+  if(action==='gradeTask'){
+   requireTeacher();const d=await getDoc(path('TaskAttempts',String(p.attemptId||''))),at=d&&decode(d);
+   if(!at||!['submitted','graded'].includes(at.status))throw Error('Жұмыс әлі тапсырылмаған. / Работа ещё не сдана.');
+   if(p.expectedUpdatedAt&&p.expectedUpdatedAt!==at.__updatedAt)throw Error('Жұмыс басқа терезеде өзгерді. Қайта ашыңыз. / Работа изменилась в другом окне. Откройте заново.');
+   if(['C','OD','E','TH','INK'].some(k=>!Number.isInteger(p.scores?.[k])||p.scores[k]<0||p.scores[k]>3))throw Error('Бес кезеңге 0–3 аралығында баға қажет. / Нужны оценки 0–3 для пяти этапов.');
+  }
   return learning(action,p);
  }
- window.CT_FIREBASE={call(action,p={}){const task=queue.then(()=>dispatch(action,p));queue=task.catch(()=>{});return task.catch(e=>{throw friendly(e);});},invalidate:()=>readCache.clear(),status:()=>({signedIn:!!session,project,version:'11.5.0',customStudentLogins:true}),_test:local?{val,plain,rowKey,decode,root}:undefined};
+ window.CT_FIREBASE={call(action,p={}){const task=queue.then(()=>dispatch(action,p));queue=task.catch(()=>{});return task.catch(e=>{throw friendly(e);});},invalidate:()=>readCache.clear(),status:()=>({signedIn:!!session,project,version:'11.6.0',customStudentLogins:true}),_test:local?{val,plain,rowKey,decode,root}:undefined};
 })();

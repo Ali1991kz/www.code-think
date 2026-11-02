@@ -7,7 +7,7 @@ service cloud.firestore {
   function pupil(s){return signed() && link().schoolId == s;}
   function uid(){return link().userId;}
   function person(s){return get(/databases/$(database)/documents/schools/$(s)/Users/$(uid())).data;}
-  function active(s){return pupil(s) && person(s).authUid == request.auth.uid && person(s).active == true;}
+  function active(s){return pupil(s) && person(s).authUid == request.auth.uid && person(s).active == true && !exists(/databases/$(database)/documents/schools/$(s)/DeletedPupils/$(uid()));}
   function student(s){return active(s) && person(s).role == 'student' && person(s).mustChangePassword == false;}
   function own(s,d){return active(s) && d.__ownerId == uid();}
   function mine(s,d){return student(s) && d.__ownerId == uid();}
@@ -62,7 +62,8 @@ service cloud.firestore {
   }
   match /LoginHandoffs/{authUid} {
    allow get: if signed() && (request.auth.uid == authUid || resource.data.oldAuthUid == request.auth.uid);
-   allow list, delete: if false;
+   allow list: if owner(resource.data.schoolId);
+   allow delete: if owner(resource.data.schoolId) && existsAfter(/databases/$(database)/documents/schools/$(resource.data.schoolId)/DeletedPupils/$(resource.data.userId));
    allow create: if signed() && request.resource.data.newAuthUid == authUid && authUid != request.auth.uid
     && student(request.resource.data.schoolId) && request.resource.data.userId == uid()
     && request.resource.data.oldAuthUid == request.auth.uid && request.resource.data.completed == false
@@ -84,7 +85,8 @@ service cloud.firestore {
      && u.id == d.userId && u.role == 'student' && u.loginHash == hash && u.authLogin == d.authLogin && meta();
    }
    allow get: if true;
-   allow list, delete: if false;
+   allow list: if owner(resource.data.schoolId);
+   allow delete: if owner(resource.data.schoolId) && existsAfter(/databases/$(database)/documents/schools/$(resource.data.schoolId)/DeletedPupils/$(resource.data.userId));
    allow create: if validRoute() && created();
    allow update: if validRoute() && request.resource.data.schoolId == resource.data.schoolId
     && request.resource.data.userId == resource.data.userId
@@ -97,12 +99,13 @@ service cloud.firestore {
     && request.resource.data.keys().hasOnly(['schoolId','userId','__updatedAt','__createdAt'])
     && getAfter(/databases/$(database)/documents/schools/$(request.resource.data.schoolId)/Users/$(request.resource.data.userId)).data.authUid == authUid
     && meta();
-   allow list, delete: if false;
+   allow list: if owner(resource.data.schoolId);
+   allow delete: if owner(resource.data.schoolId) && existsAfter(/databases/$(database)/documents/schools/$(resource.data.schoolId)/DeletedPupils/$(resource.data.userId));
   }
   match /schools/{s}/Users/{id} {
    allow get: if owner(s) || (active(s) && id == uid()) || receiving(s,id);
    allow list: if owner(s);
-   allow create: if owner(s) && request.resource.data.id == id && request.resource.data.__ownerId == id
+   allow create: if owner(s) && !exists(/databases/$(database)/documents/schools/$(s)/DeletedPupils/$(id)) && request.resource.data.id == id && request.resource.data.__ownerId == id
     && request.resource.data.authUid is string && request.resource.data.role in ['teacher','student']
     && (request.resource.data.role == 'student' || id == s)
     && !request.resource.data.keys().hasAny(['password','passwordHash','passwordSalt','temporaryPassword','teacherAccessCode']) && created();
@@ -123,7 +126,9 @@ service cloud.firestore {
      && getAfter(/databases/$(database)/documents/identities/$(request.auth.uid)).data.userId == id
      && getAfter(/databases/$(database)/documents/identities/$(request.auth.uid)).data.schoolId == s)
    );
-   allow delete: if false;
+   allow delete: if owner(s) && resource.data.role == 'student' && resource.data.active == false
+    && resource.data.deletedAt is string && resource.data.deletedAt.size()>0
+    && existsAfter(/databases/$(database)/documents/schools/$(s)/DeletedPupils/$(id));
   }
   match /schools/{s}/StudentProfiles/{id} {
    allow get: if student(s) && id == uid();
@@ -135,6 +140,34 @@ service cloud.firestore {
     && request.resource.data.weeklyTarget >= 1 && request.resource.data.weeklyTarget <= 5
     && meta() && ((!exists(/databases/$(database)/documents/schools/$(s)/StudentProfiles/$(id)) && created())
      || (exists(/databases/$(database)/documents/schools/$(s)/StudentProfiles/$(id)) && immutableOwner() && request.resource.data.__createdAt == resource.data.__createdAt));
+   allow delete: if owner(s) && existsAfter(/databases/$(database)/documents/schools/$(s)/DeletedPupils/$(id));
+  }
+  match /schools/{s}/TeacherProfiles/{id} {
+   allow get: if owner(s) && id == request.auth.uid;
+   allow create, update: if owner(s) && id == request.auth.uid && request.resource.data.id == id
+    && request.resource.data.teacherId == id && request.resource.data.avatar in ['robot','rocket','owl','cat','turtle','star']
+    && text(request.resource.data.subject,80) && text(request.resource.data.bio,500)
+    && request.resource.data.keys().hasOnly(['id','teacherId','avatar','subject','bio','__createdAt','__updatedAt']) && meta()
+    && (!exists(/databases/$(database)/documents/schools/$(s)/TeacherProfiles/$(id)) || request.resource.data.__createdAt == resource.data.__createdAt);
+   allow delete: if false;
+  }
+  // An irreversible, non-personal marker prevents resurrecting a purged pupil.
+  match /schools/{s}/DeletedPupils/{id} {
+   allow get, list: if owner(s);
+   allow create: if owner(s) && request.resource.data.id == id && request.resource.data.userId == id
+    && request.resource.data.keys().hasOnly(['id','userId','__createdAt','__updatedAt']) && created()
+    && get(/databases/$(database)/documents/schools/$(s)/Users/$(id)).data.role == 'student'
+    && get(/databases/$(database)/documents/schools/$(s)/Users/$(id)).data.active == false
+    && get(/databases/$(database)/documents/schools/$(s)/Users/$(id)).data.deletedAt.size()>0;
+   allow update, delete: if false;
+  }
+  match /schools/{s}/PurgeJobs/{id} {
+   allow get, list: if owner(s);
+   allow create, update: if owner(s) && request.resource.data.id == id && request.resource.data.userId == id
+    && existsAfter(/databases/$(database)/documents/schools/$(s)/DeletedPupils/$(id))
+    && request.resource.data.status in ['deleting','done'] && request.resource.data.deletedCount is int && request.resource.data.deletedCount>=0
+    && request.resource.data.keys().hasOnly(['id','userId','status','deletedCount','__createdAt','__updatedAt']) && meta()
+    && (!exists(/databases/$(database)/documents/schools/$(s)/PurgeJobs/$(id)) || (request.resource.data.__createdAt == resource.data.__createdAt && resource.data.status!='done'));
    allow delete: if false;
   }
   match /schools/{s}/{table}/{id} {
