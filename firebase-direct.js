@@ -115,7 +115,7 @@
  }
  function clean(table,r,tables){
   const result={};for(const field of window.CT_CORE.schemas[table]||[])if(r[field]!==undefined&&!['passwordHash','passwordSalt','accessCodeHash','teacherAccessCode'].includes(field))result[field]=r[field];
-  if(table==='Users'){result.authUid=r.authUid;if(r.authChangedAt)result.authChangedAt=r.authChangedAt;if(r.deletedAt!==undefined)result.deletedAt=r.deletedAt;}
+  if(table==='Users'){result.authUid=r.authUid;if(r.authChangedAt)result.authChangedAt=r.authChangedAt;if(r.deletedAt!==undefined)result.deletedAt=r.deletedAt;if(r.authLogin)result.authLogin=r.authLogin;if(r.loginHash)result.loginHash=r.loginHash;}
   if(!SHARED.has(table)&&table!=='PedagogyReviews')result.__ownerId=ownerId(table,r,tables);
   return result;
  }
@@ -192,6 +192,25 @@
   return {unlocked:true,entries,unreadable};
  }
 
+
+ async function loginHash(login){return Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256',new TextEncoder().encode(norm(login)))),x=>x.toString(16).padStart(2,'0')).join('');}
+ async function resolveLogin(login){
+  const canonical=norm(login);
+  // Real teacher email addresses are never routed through the pupil directory.
+  if(canonical.includes('@'))return canonical;
+  try{const d=await request(storeBase+root+'/loginRoutes/'+await loginHash(canonical),undefined,null,'GET');const row=decode(d);if(!/^s[78]-[a-f0-9]{14}$/.test(row.authLogin||''))throw Error('Кіру байланысы жарамсыз. / Некорректная запись входа.');return row.authLogin;}
+  catch(e){if(e.status===404)return canonical;throw e;}
+ }
+ async function assertDirectoryOwner(){
+  const d=await getDoc(root+'/platformConfig/auth');
+  if(!d||decode(d).directoryOwnerUid!==profile.id)throw Error('Логинді сақтайтын баптау әлі қосылмаған. Жоба әкімшісіне хабарласыңыз. / Сохранение логина ещё не настроено. Обратитесь к администратору проекта.');
+ }
+ async function loginRouteWrite(u,a){
+  const hash=await loginHash(u.login),name=root+'/loginRoutes/'+hash,old=await getDoc(name);
+  if(old&&(decode(old).schoolId!==identity.schoolId||decode(old).userId!==u.id))throw Error('Логин басқа аккаунтпен байланысқан. / Логин связан с другим аккаунтом.');
+  return documentWrite(name,{version:1,schoolId:identity.schoolId,userId:u.id,authLogin:a.login},old);
+ }
+
  async function createAccount(cacheKey,grade,requestedLogin=''){
   if(pendingAccounts.has(cacheKey)){
    const item=pendingAccounts.get(cacheKey);
@@ -219,7 +238,7 @@
    const state=await load(['Users','Classes','ClassStudents','Assignments','Tasks'],tx);
    const inTx=await getDoc(markerPath,tx);if(inTx)return {alreadyProcessed:true,row:row.row,name,ok:true};
    if(state.tables.Users.some(u=>u.role==='student'&&norm(u.name)===norm(name)&&norm(u.className)===norm(className)))throw Error('Бұл оқушы сыныпта бар. / Ученик уже есть в классе.');
-   if(requestedLogin&&state.tables.Users.some(u=>norm(u.login)===requestedLogin))throw Error('Бұл логин тіркелген. Басқа логин таңдаңыз. / Этот логин уже зарегистрирован. Выберите другой.');
+   if(requestedLogin&&(state.tables.Users.some(u=>norm(u.login)===requestedLogin)||await getDoc(root+'/loginRoutes/'+await loginHash(requestedLogin))))throw Error('Бұл логин тіркелген. Басқа логин таңдаңыз. / Этот логин уже зарегистрирован. Выберите другой.');
    const cls=state.tables.Classes.find(c=>norm(c.name)===norm(className));
    if(cls&&String(cls.grade)!==grade)throw Error('Сынып атауы басқа деңгеймен тіркелген. / Класс зарегистрирован для другой параллели.');
    const account=await createAccount(marker,grade,requestedLogin);account.cacheKey=marker;
@@ -247,7 +266,7 @@
   const state=await load(['Users','Classes','ClassStudents','Assignments','Tasks']),core=window.CT_CORE.create(state.tables,profile),credentials=[];
   const users=ids.map(id=>state.tables.Users.find(u=>u.id===id&&u.role==='student'));if(users.some(x=>!x))throw Error('Оқушы табылмады. / Ученик не найден.');
   const replacements=[];
-  if(p.operation==='reset')await requireVault();
+  if(p.operation==='reset'){await requireVault();await assertDirectoryOwner();}
   for(const u of users){
    const dest=core.data.Users.find(x=>x.id===u.id);core.dirty.add('Users');
    if(u.deletedAt&&p.operation!=='restore')throw Error('Алдымен өшірілген оқушыны қалпына келтіріңіз. / Сначала восстановите удалённого ученика.');
@@ -259,18 +278,18 @@
     const done=p.requestId&&await getDoc(path('RegistrationJobs','reset_'+p.requestId+'_'+u.id));
     if(done){const receipt=await getDoc(path('RegistrationJobs','credential_'+u.id));if(receipt&&decode(receipt).login===u.login){const saved=await vault.open(decode(receipt));credentials.push({...saved,name:u.name,className:u.className,ok:true});}continue;}
     const a=await createAccount('reset_'+u.id+'_'+(p.requestId||random()),u.grade);
-    Object.assign(dest,{login:a.login,authUid:a.authUid,mustChangePassword:true,authChangedAt:Date.now()});
-    replacements.push({a,userId:u.id});credentials.push({userId:u.id,name:u.name,className:u.className,login:a.login,temporaryPassword:a.temporaryPassword,ok:true});
+    Object.assign(dest,{authLogin:a.login,loginHash:await loginHash(u.login),authUid:a.authUid,mustChangePassword:true,authChangedAt:Date.now()});
+    replacements.push({a,userId:u.id,user:u});credentials.push({userId:u.id,name:u.name,className:u.className,login:u.login,temporaryPassword:a.temporaryPassword,ok:true});
    }else throw Error('Әрекет белгісіз. / Неизвестное действие.');
   }
   const writes=writesFor(state,core);
-  for(const {a,userId}of replacements){writes.push(documentWrite(`${root}/identities/${a.authUid}`,{schoolId:identity.schoolId,userId},null));writes.push(await receiptWrite({userId,login:a.login,temporaryPassword:a.temporaryPassword}));if(p.requestId)writes.push(documentWrite(path('RegistrationJobs','reset_'+p.requestId+'_'+userId),{userId,operation:'reset'},null));}
+  for(const {a,userId,user:u}of replacements){writes.push(documentWrite(`${root}/identities/${a.authUid}`,{schoolId:identity.schoolId,userId},null));writes.push(await receiptWrite({userId,login:u.login,temporaryPassword:a.temporaryPassword}));writes.push(await loginRouteWrite(u,a));if(p.requestId)writes.push(documentWrite(path('RegistrationJobs','reset_'+p.requestId+'_'+userId),{userId,operation:'reset'},null));}
   await commit(writes);for(const {a}of replacements)for(const [k,v]of pendingAccounts)if(v===a)pendingAccounts.delete(k);
   return {updated:users.length,operation:p.operation,credentials};
  }
  async function changePassword(p){
   const pw=String(p.password||'');if(pw.length<12||pw.length>128||pw===p.currentPassword)throw Error('Жаңа құпиясөз өзгеше, 12–128 таңбалы болсын. / Выберите новый пароль длиной 12–128 символов.');
-  const fresh=await auth('signInWithPassword',{email:alias(profile.login),password:String(p.currentPassword||''),returnSecureToken:true});
+  const fresh=await auth('signInWithPassword',{email:alias(profile.authLogin||profile.login),password:String(p.currentPassword||''),returnSecureToken:true});
   if(fresh.localId!==session.uid)throw Error('Аккаунт сәйкес емес. / Аккаунт не совпадает.');
   const updated=await auth('update',{idToken:fresh.idToken,password:pw,returnSecureToken:true});storeSession({...fresh,...updated});
   const name=path('Users',profile.id),old=await getDoc(name),obj=decode(old);obj.mustChangePassword=false;
@@ -358,12 +377,12 @@
 
  async function dispatch(action,p={}){
   if(!project||!key)throw Error('Firebase config.js баптауларын толтырыңыз. / Заполните Firebase config.js.');
-  if(action==='ping')return {version:'11.3.0',backend:'firebase-direct',plan:'Spark',customStudentLogins:true};
+  if(action==='ping')return {version:'11.4.0',backend:'firebase-direct',plan:'Spark',customStudentLogins:true};
   if(action==='logout'){clear();return {loggedOut:true};}
   if(action==='setupTeacher'){const r=await setupTeacher(p);if(!r.needsApproval&&profile?.role==='teacher')await vault.unlock(profile,String(p.password));return r;}
   if(action==='login'){
-   vault.lock();const r=await auth('signInWithPassword',{email:alias(p.login),password:String(p.password||''),returnSecureToken:true});storeSession(r);
-   try{await current();if(p.role&&profile.role!==p.role)throw Error('Аккаунт рөлін дұрыс таңдаңыз. / Выберите правильную роль аккаунта.');
+   vault.lock();const authLogin=await resolveLogin(p.login);const r=await auth('signInWithPassword',{email:alias(authLogin),password:String(p.password||''),returnSecureToken:true});storeSession(r);
+   try{await current();if(norm(profile.login)!==norm(p.login))throw Error('Логин немесе құпиясөз қате. / Неверный логин или пароль.');if(p.role&&profile.role!==p.role)throw Error('Аккаунт рөлін дұрыс таңдаңыз. / Выберите правильную роль аккаунта.');
     const name=path('Users',profile.id),old=await getDoc(name),obj=decode(old);obj.lastLoginAt=new Date().toISOString();await commit([documentWrite(name,clean('Users',obj,{}),old)]);
     if(profile.role==='teacher')await vault.unlock(profile,String(p.password||''));
     return {token:random(),user:window.CT_CORE.create({},profile).publicUser(profile)};
@@ -383,5 +402,5 @@
   if(action==='installMaterials')return installMaterials(p);
   return learning(action,p);
  }
- window.CT_FIREBASE={call(action,p={}){const task=queue.then(()=>dispatch(action,p));queue=task.catch(()=>{});return task.catch(e=>{throw friendly(e);});},invalidate:()=>readCache.clear(),status:()=>({signedIn:!!session,project,version:'11.3.0',customStudentLogins:true}),_test:local?{val,plain,rowKey,decode,root}:undefined};
+ window.CT_FIREBASE={call(action,p={}){const task=queue.then(()=>dispatch(action,p));queue=task.catch(()=>{});return task.catch(e=>{throw friendly(e);});},invalidate:()=>readCache.clear(),status:()=>({signedIn:!!session,project,version:'11.4.0',customStudentLogins:true}),_test:local?{val,plain,rowKey,decode,root}:undefined};
 })();

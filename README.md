@@ -1,4 +1,4 @@
-# CODE THINK 11.3.0
+# CODE THINK 11.4.0
 
 Static Python learning platform: 31 tasks, grades 7–8 (19/12), Kazakh and Russian.
 GitHub Pages hosts the site. Firebase Auth and Firestore store accounts/progress.
@@ -34,7 +34,27 @@ RegistrationJobs collection, atomically with account enrollment/reset. The key i
 derived from the teacher password (PBKDF2-SHA256, 210000 iterations) and held only
 in the browser session, not in Firestore. No pupil-chosen password is captured.
 After a teacher-password change old receipts may need replacement.
-Legacy unsaved passwords cannot be recovered. Reset gives a new login and temporary
+Legacy unsaved passwords cannot be recovered. Since 11.4, reset keeps the visible login and issues only a new temporary
 password while retaining pupil identity, work and grades. Archive is reversible and
 does not erase work or delete Firebase Authentication accounts.
-Rules/config and Spark billing stay unchanged. See UPDATE_11_3_KK.txt.
+Spark billing stays unchanged. See UPDATE_11_4_KK.txt.
+
+
+## 11.4 stable pupil logins
+
+Deploy the matching firestore.rules before the new client. In Firebase Console,
+the project owner must set platformConfig/auth.directoryOwnerUid to the existing
+site-owner teacher UID. This is an IAM-only configuration; clients cannot appoint
+themselves. The configured teacher can reset their own pupils. Other approved
+teachers cannot claim or overwrite the site's login directory.
+
+Reset rotates the internal Firebase Auth account while keeping Users.login stable.
+The atomic commit updates the private profile, opaque login route, identity binding,
+and encrypted temporary receipt together. The public, non-listable lookup stores
+only an opaque Auth alias and random tenant/pupil IDs, with SHA-256 document keys.
+It never stores passwords, names or learning records. Existing legacy accounts keep
+working without migration; their route is created on their first reset.
+
+Use the same visible login for sign-in and password changes. Old credentials and
+old sessions no longer access data. Existing identities cannot be reassigned across
+tenants. This does not retroactively rename logins changed by older releases.

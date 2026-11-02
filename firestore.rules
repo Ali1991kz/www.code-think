@@ -44,9 +44,31 @@ service cloud.firestore {
    allow get: if signed() && request.auth.uid == authUid;
    allow list, create, update, delete: if false;
   }
+  // Only the IAM-configured site owner can maintain the pupil login directory.
+  // It contains an opaque Auth alias, never names, passwords or learning data.
+  match /platformConfig/{id} {
+   allow get: if signed() && id == 'auth' && resource.data.directoryOwnerUid == request.auth.uid;
+   allow list, create, update, delete: if false;
+  }
+  match /loginRoutes/{hash} {
+   function validRoute(){
+    let d=request.resource.data;
+    let u=getAfter(/databases/$(database)/documents/schools/$(d.schoolId)/Users/$(d.userId)).data;
+    return signed() && owner(d.schoolId) && request.auth.uid == get(/databases/$(database)/documents/platformConfig/auth).data.directoryOwnerUid
+     && d.keys().hasOnly(['version','schoolId','userId','authLogin','__createdAt','__updatedAt'])
+     && hash.matches('[a-f0-9]{64}') && d.version == 1 && d.authLogin.matches('s[78]-[a-f0-9]{14}')
+     && u.id == d.userId && u.role == 'student' && u.loginHash == hash && u.authLogin == d.authLogin && meta();
+   }
+   allow get: if true;
+   allow list, delete: if false;
+   allow create: if validRoute() && created();
+   allow update: if validRoute() && request.resource.data.schoolId == resource.data.schoolId
+    && request.resource.data.userId == resource.data.userId
+    && request.resource.data.__createdAt == resource.data.__createdAt;
+  }
   match /identities/{authUid} {
    allow get: if signed() && (request.auth.uid == authUid || owner(resource.data.schoolId));
-   allow create, update: if owner(request.resource.data.schoolId)
+   allow create, update: if (!exists(/databases/$(database)/documents/identities/$(authUid)) || (resource.data.schoolId == request.resource.data.schoolId && resource.data.userId == request.resource.data.userId)) && owner(request.resource.data.schoolId)
     && request.resource.data.keys().hasOnly(['schoolId','userId','__updatedAt','__createdAt'])
     && getAfter(/databases/$(database)/documents/schools/$(request.resource.data.schoolId)/Users/$(request.resource.data.userId)).data.authUid == authUid
     && meta();
@@ -62,6 +84,8 @@ service cloud.firestore {
    allow update: if meta() && (
     (owner(s) && request.resource.data.id == resource.data.id && immutableOwner()
      && request.resource.data.role == resource.data.role
+     && request.resource.data.login == resource.data.login
+     && request.resource.data.__createdAt == resource.data.__createdAt
      && !request.resource.data.keys().hasAny(['password','passwordHash','passwordSalt','temporaryPassword','teacherAccessCode']))
     || (active(s) && id == uid() && changedOnly(['lastLoginAt','mustChangePassword','__updatedAt'])
      && request.resource.data.mustChangePassword == false && text(request.resource.data.lastLoginAt,50))
