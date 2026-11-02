@@ -66,7 +66,7 @@
   try{return await fs(name,undefined,'GET');}catch(e){if(e.status===404)return null;throw e;}
  }
  async function current(){
-  await token();const d=await getDoc(`${root}/identities/${session.uid}`);if(!d)throw Error('Аккаунт платформада дайындалмаған. Мұғалімге хабарласыңыз. / Аккаунт не подготовлен. Обратитесь к учителю.');
+  await token();let d=await getDoc(`${root}/identities/${session.uid}`);if(!d){await finishLoginHandoff();d=await getDoc(`${root}/identities/${session.uid}`);}if(!d)throw Error('Аккаунт платформада дайындалмаған. Мұғалімге хабарласыңыз. / Аккаунт не подготовлен. Обратитесь к учителю.');
   identity=decode(d);const p=await getDoc(path('Users',identity.userId));if(!p)throw Error('Аккаунт табылмады. / Аккаунт не найден.');profileDocument=p;profile=decode(p);
   if(profile.authUid!==session.uid||String(profile.active)!=='true'||profile.deletedAt)throw Error('Аккаунт қолжетімсіз. Мұғалімге хабарласыңыз. / Аккаунт недоступен. Обратитесь к учителю.');
   return profile;
@@ -287,6 +287,53 @@
   await commit(writes);for(const {a}of replacements)for(const [k,v]of pendingAccounts)if(v===a)pendingAccounts.delete(k);
   return {updated:users.length,operation:p.operation,credentials};
  }
+ // Profile preferences contain no grades, XP or credentials.
+ const avatars=new Set(['robot','rocket','owl','cat','turtle','star']);
+ function requirePupil(){if(profile.role!=='student'||profile.mustChangePassword)throw Error('Оқушы аккаунты қажет. / Нужен аккаунт ученика.');}
+ async function studentProfile(){
+  requirePupil();const d=await getDoc(path('StudentProfiles',profile.id));return d?decode(d):{avatar:'robot',goalText:'',weeklyTarget:2};
+ }
+ async function saveStudentProfile(p){
+  requirePupil();const goal=String(p.goalText||'').trim(),n=Number(p.weeklyTarget);
+  if(!avatars.has(p.avatar)||goal.length>240||!Number.isInteger(n)||n<1||n>5)throw Error('Аватар, 240 таңбаға дейінгі мақсат және 1–5 тапсырма таңда. / Выбери аватар, цель до 240 символов и 1–5 заданий.');
+  const name=path('StudentProfiles',profile.id),old=await getDoc(name);
+  await commit([documentWrite(name,{id:profile.id,userId:profile.id,__ownerId:profile.id,avatar:p.avatar,goalText:goal,weeklyTarget:n},old)]);
+  return studentProfile();
+ }
+ // A pupil authorizes a one-time handoff using their current password. Native
+ // Auth reserves the new username. The recipient token can only complete this
+ // exact handoff; pupil identity and all educational records remain unchanged.
+ async function changeStudentLogin(p){
+  requirePupil();const login=norm(p.login),pw=String(p.currentPassword||'');
+  if(!/^[a-z0-9][a-z0-9._-]{2,31}$/.test(login)||/^s[78]-[a-f0-9]{14}$/.test(login))throw Error('Логин: 3–32 латын әрпі, сан, нүкте, _ немесе -. / Логин: 3–32 латинских символа, цифры, точка, _ или -.');
+  if(login===norm(profile.login))return {changed:false,login};
+  if(profile.__loginChangedAt&&Date.now()-new Date(profile.__loginChangedAt).getTime()<86400000)throw Error('Логинді тәулігіне бір рет өзгертуге болады. / Логин можно менять раз в сутки.');
+  const fresh=await auth('signInWithPassword',{email:alias(profile.authLogin||profile.login),password:pw,returnSecureToken:true});
+  if(fresh.localId!==session.uid)throw Error('Аккаунт сәйкес емес. / Аккаунт не совпадает.');storeSession(fresh);
+  const hash=await loginHash(login);if(await getDoc(root+'/loginRoutes/'+hash))throw Error('Бұл логин бос емес. / Этот логин занят.');
+  const capacity=registrationCapacity();if(!capacity.remaining)throw Error('Тіркеу шегі уақытша аяқталды. Кейінірек қайтала. / Лимит регистрации временно исчерпан. Повтори позже.');
+  const next=await auth('signUp',{email:alias(login),password:pw,returnSecureToken:true});registrationRecorded();
+  const h={schoolId:identity.schoolId,userId:profile.id,oldAuthUid:session.uid,newAuthUid:next.localId,newLogin:login,loginHash:hash,completed:false};
+  try{await commit([documentWrite(root+'/LoginHandoffs/'+next.localId,h,null)]);}
+  catch(e){
+   // If the response was lost, do not erase an account with an accepted handoff.
+   let accepted;try{accepted=await getDoc(root+'/LoginHandoffs/'+next.localId);}catch{throw Error('Байланыс үзілді. Жаңа логин мен қазіргі парольмен кіріп көр; болмаса бұрынғы логинмен қайтала. / Связь прервана. Попробуй новый логин с текущим паролем, иначе повтори со старым логином.');}
+   if(!accepted){try{await auth('delete',{idToken:next.idToken});}catch{}throw e;}
+  }
+  storeSession(next);identity=null;profile=null;profileDocument=null;
+  await finishLoginHandoff();clear();return {changed:true,login,loginAgain:true};
+ }
+ async function finishLoginHandoff(){
+  const hName=root+'/LoginHandoffs/'+session.uid,d=await getDoc(hName);if(!d)return false;
+  const h=decode(d);if(h.completed||h.newAuthUid!==session.uid) return false;
+  const uName=path('Users',h.userId,h.schoolId),old=await getDoc(uName);if(!old)throw Error('Аккаунт табылмады. / Аккаунт не найден.');
+  const u=decode(old);identity={schoolId:h.schoolId,userId:h.userId};profile=u;profileDocument=old;
+  const renamed={...u,login:h.newLogin,authLogin:h.newLogin,loginHash:h.loginHash,authUid:session.uid};
+  const w=documentWrite(uName,clean('Users',renamed,{}),old);w.updateTransforms.push({fieldPath:'__loginChangedAt',setToServerValue:'REQUEST_TIME'});
+  await commit([w,documentWrite(root+'/identities/'+session.uid,{schoolId:h.schoolId,userId:h.userId},null),documentWrite(hName,{...Object.fromEntries(Object.entries(h).filter(([k])=>!k.startsWith('__'))),completed:true},d)]);
+  return true;
+ }
+
  async function changePassword(p){
   const pw=String(p.password||'');if(pw.length<12||pw.length>128||pw===p.currentPassword)throw Error('Жаңа құпиясөз өзгеше, 12–128 таңбалы болсын. / Выберите новый пароль длиной 12–128 символов.');
   const fresh=await auth('signInWithPassword',{email:alias(profile.authLogin||profile.login),password:String(p.currentPassword||''),returnSecureToken:true});
@@ -325,12 +372,12 @@
   if(teacher&&view==='diagnostics')names.push('Answers','DiagnosticProfiles');
   if(teacher&&view==='work')names.push('TaskSteps');
   if(teacher&&view==='corrections')names.push('Corrections','Answers','TaskSteps');
-  if((teacher&&view==='pedagogy')||(!teacher&&['task','transfer','probe','results'].includes(view)))names.push('LearningEvidence','TransferProbes','PedagogyReviews');
+  if((teacher&&view==='pedagogy')||(!teacher&&['task','transfer','probe','results','profile'].includes(view)))names.push('LearningEvidence','TransferProbes','PedagogyReviews');
   const state=await load(names,null,p,'schoolWorkspace');
   const core=window.CT_CORE.create(state.tables,profile);
   const result=teacher?{dashboard:core.run('teacherDashboard'),teacherWS:core.run('teacherWorkspace'),corrections:core.run('correctionWorkspace')}:{mine:core.run('me'),workspace:core.run('studentWorkspace'),corrections:core.run('correctionWorkspace')};
   result.ped=(names.includes('LearningEvidence')||names.includes('TransferProbes'))?core.run('pedagogyWorkspace'):{evidence:[],probes:[],reviews:[]};
-  await commit(writesFor(state,core));if(teacher&&view==='students')result.temporaryPasswords=await temporaryPasswords(state.tables.Users);return result;
+  await commit(writesFor(state,core));if(!teacher)result.studentProfile=await studentProfile();if(teacher&&view==='students')result.temporaryPasswords=await temporaryPasswords(state.tables.Users);return result;
  }
  const backupTables=[...Object.keys(window.CT_CORE.schemas).filter(n=>n!=='Sessions'),'TeacherSolutions','TaskChecks'];
  async function exportBackup(){
@@ -377,7 +424,7 @@
 
  async function dispatch(action,p={}){
   if(!project||!key)throw Error('Firebase config.js баптауларын толтырыңыз. / Заполните Firebase config.js.');
-  if(action==='ping')return {version:'11.4.0',backend:'firebase-direct',plan:'Spark',customStudentLogins:true};
+  if(action==='ping')return {version:'11.5.0',backend:'firebase-direct',plan:'Spark',customStudentLogins:true};
   if(action==='logout'){clear();return {loggedOut:true};}
   if(action==='setupTeacher'){const r=await setupTeacher(p);if(!r.needsApproval&&profile?.role==='teacher')await vault.unlock(profile,String(p.password));return r;}
   if(action==='login'){
@@ -399,8 +446,11 @@
   if(action==='importStudents')return importStudents(p);
   if(action==='bulkManageStudents')return bulk(p);
   if(action==='changePassword')return changePassword(p);
+  if(action==='changeStudentLogin')return changeStudentLogin(p);
+  if(action==='studentProfile')return studentProfile();
+  if(action==='saveStudentProfile')return saveStudentProfile(p);
   if(action==='installMaterials')return installMaterials(p);
   return learning(action,p);
  }
- window.CT_FIREBASE={call(action,p={}){const task=queue.then(()=>dispatch(action,p));queue=task.catch(()=>{});return task.catch(e=>{throw friendly(e);});},invalidate:()=>readCache.clear(),status:()=>({signedIn:!!session,project,version:'11.4.0',customStudentLogins:true}),_test:local?{val,plain,rowKey,decode,root}:undefined};
+ window.CT_FIREBASE={call(action,p={}){const task=queue.then(()=>dispatch(action,p));queue=task.catch(()=>{});return task.catch(e=>{throw friendly(e);});},invalidate:()=>readCache.clear(),status:()=>({signedIn:!!session,project,version:'11.5.0',customStudentLogins:true}),_test:local?{val,plain,rowKey,decode,root}:undefined};
 })();

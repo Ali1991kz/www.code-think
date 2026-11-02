@@ -50,6 +50,30 @@ service cloud.firestore {
    allow get: if signed() && id == 'auth' && resource.data.directoryOwnerUid == request.auth.uid;
    allow list, create, update, delete: if false;
   }
+  // One-time login handoff: authorized by the current pupil, completed only by
+  // the exact native Auth account that reserved the chosen new login.
+  function receiving(s,id){
+   let h=get(/databases/$(database)/documents/LoginHandoffs/$(request.auth.uid)).data;
+   let u=get(/databases/$(database)/documents/schools/$(s)/Users/$(id)).data;
+   return signed() && h.newAuthUid == request.auth.uid && h.schoolId == s && h.userId == id
+    && h.completed == false && request.time < h.__createdAt + duration.value(24,'h')
+    && u.authUid == h.oldAuthUid && u.role == 'student' && u.active == true && u.mustChangePassword == false
+    && request.auth.token.email == h.newLogin + '@code-think.invalid';
+  }
+  match /LoginHandoffs/{authUid} {
+   allow get: if signed() && (request.auth.uid == authUid || resource.data.oldAuthUid == request.auth.uid);
+   allow list, delete: if false;
+   allow create: if signed() && request.resource.data.newAuthUid == authUid && authUid != request.auth.uid
+    && student(request.resource.data.schoolId) && request.resource.data.userId == uid()
+    && request.resource.data.oldAuthUid == request.auth.uid && request.resource.data.completed == false
+    && request.resource.data.newLogin.matches('[a-z0-9][a-z0-9._-]{2,31}')
+    && !request.resource.data.newLogin.matches('s[78]-[a-f0-9]{14}') && request.resource.data.loginHash.matches('[a-f0-9]{64}')
+    && (!('__loginChangedAt' in person(request.resource.data.schoolId)) || request.time >= person(request.resource.data.schoolId).__loginChangedAt + duration.value(24,'h'))
+    && request.resource.data.keys().hasOnly(['schoolId','userId','oldAuthUid','newAuthUid','newLogin','loginHash','completed','__createdAt','__updatedAt']) && created();
+   allow update: if receiving(resource.data.schoolId,resource.data.userId)
+    && changedOnly(['completed','__updatedAt']) && request.resource.data.completed == true && meta()
+    && getAfter(/databases/$(database)/documents/schools/$(resource.data.schoolId)/Users/$(resource.data.userId)).data.authUid == request.auth.uid;
+  }
   match /loginRoutes/{hash} {
    function validRoute(){
     let d=request.resource.data;
@@ -68,14 +92,15 @@ service cloud.firestore {
   }
   match /identities/{authUid} {
    allow get: if signed() && (request.auth.uid == authUid || owner(resource.data.schoolId));
-   allow create, update: if (!exists(/databases/$(database)/documents/identities/$(authUid)) || (resource.data.schoolId == request.resource.data.schoolId && resource.data.userId == request.resource.data.userId)) && owner(request.resource.data.schoolId)
+   allow create, update: if (!exists(/databases/$(database)/documents/identities/$(authUid)) || (resource.data.schoolId == request.resource.data.schoolId && resource.data.userId == request.resource.data.userId))
+    && (owner(request.resource.data.schoolId) || (request.auth.uid == authUid && receiving(request.resource.data.schoolId,request.resource.data.userId)))
     && request.resource.data.keys().hasOnly(['schoolId','userId','__updatedAt','__createdAt'])
     && getAfter(/databases/$(database)/documents/schools/$(request.resource.data.schoolId)/Users/$(request.resource.data.userId)).data.authUid == authUid
     && meta();
    allow list, delete: if false;
   }
   match /schools/{s}/Users/{id} {
-   allow get: if owner(s) || (active(s) && id == uid());
+   allow get: if owner(s) || (active(s) && id == uid()) || receiving(s,id);
    allow list: if owner(s);
    allow create: if owner(s) && request.resource.data.id == id && request.resource.data.__ownerId == id
     && request.resource.data.authUid is string && request.resource.data.role in ['teacher','student']
@@ -90,7 +115,26 @@ service cloud.firestore {
     || (active(s) && id == uid() && changedOnly(['lastLoginAt','mustChangePassword','__updatedAt'])
      && request.resource.data.mustChangePassword == false && text(request.resource.data.lastLoginAt,50))
     || (active(s) && id == uid() && changedOnly(['lastLoginAt','__updatedAt']) && text(request.resource.data.lastLoginAt,50))
+    || (receiving(s,id) && changedOnly(['login','authLogin','loginHash','authUid','__loginChangedAt','__updatedAt'])
+     && request.resource.data.authUid == request.auth.uid && request.resource.data.__loginChangedAt == request.time
+     && request.resource.data.login == get(/databases/$(database)/documents/LoginHandoffs/$(request.auth.uid)).data.newLogin
+     && request.resource.data.authLogin == request.resource.data.login
+     && request.resource.data.loginHash == get(/databases/$(database)/documents/LoginHandoffs/$(request.auth.uid)).data.loginHash
+     && getAfter(/databases/$(database)/documents/identities/$(request.auth.uid)).data.userId == id
+     && getAfter(/databases/$(database)/documents/identities/$(request.auth.uid)).data.schoolId == s)
    );
+   allow delete: if false;
+  }
+  match /schools/{s}/StudentProfiles/{id} {
+   allow get: if student(s) && id == uid();
+   allow create, update: if student(s) && id == uid() && request.resource.data.id == id
+    && request.resource.data.userId == id && request.resource.data.__ownerId == id
+    && request.resource.data.keys().hasOnly(['id','userId','__ownerId','avatar','goalText','weeklyTarget','__createdAt','__updatedAt'])
+    && request.resource.data.avatar in ['robot','rocket','owl','cat','turtle','star']
+    && text(request.resource.data.goalText,240) && request.resource.data.weeklyTarget is int
+    && request.resource.data.weeklyTarget >= 1 && request.resource.data.weeklyTarget <= 5
+    && meta() && ((!exists(/databases/$(database)/documents/schools/$(s)/StudentProfiles/$(id)) && created())
+     || (exists(/databases/$(database)/documents/schools/$(s)/StudentProfiles/$(id)) && immutableOwner() && request.resource.data.__createdAt == resource.data.__createdAt));
    allow delete: if false;
   }
   match /schools/{s}/{table}/{id} {
