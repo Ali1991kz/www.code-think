@@ -1,0 +1,177 @@
+rules_version = '2';
+service cloud.firestore {
+ match /databases/{database}/documents {
+  function signed(){return request.auth != null;}
+  function owner(s){return signed() && request.auth.uid == s && get(/databases/$(database)/documents/teacherAccess/$(s)).data.enabled == true;}
+  function link(){return get(/databases/$(database)/documents/identities/$(request.auth.uid)).data;}
+  function pupil(s){return signed() && link().schoolId == s;}
+  function uid(){return link().userId;}
+  function person(s){return get(/databases/$(database)/documents/schools/$(s)/Users/$(uid())).data;}
+  function active(s){return pupil(s) && person(s).authUid == request.auth.uid && person(s).active == true;}
+  function student(s){return active(s) && person(s).role == 'student' && person(s).mustChangePassword == false;}
+  function own(s,d){return active(s) && d.__ownerId == uid();}
+  function mine(s,d){return student(s) && d.__ownerId == uid();}
+  function immutableOwner(){return request.resource.data.__ownerId == resource.data.__ownerId;}
+  function changedOnly(fields){return request.resource.data.diff(resource.data).affectedKeys().hasOnly(fields);}
+  function text(v,n){return v is string && v.size() <= n;}
+  function meta(){return request.resource.data.__updatedAt == request.time;}
+  function created(){return meta() && request.resource.data.__createdAt == request.time;}
+  function baseline(s){return get(/databases/$(database)/documents/schools/$(s)/Attempts/$(uid() + '_baseline')).data.status in ['submitted','graded'];}
+  function finalOpen(s){return get(/databases/$(database)/documents/schools/$(s)/Settings/finalDiagnosticOpen).data.value == 'true';}
+  function diagnostic(s,id){return get(/databases/$(database)/documents/schools/$(s)/Attempts/$(id)).data;}
+  function taskRun(s,id){return get(/databases/$(database)/documents/schools/$(s)/TaskAttempts/$(id)).data;}
+  function openDiagnostic(s,id){return diagnostic(s,id).userId == uid() && diagnostic(s,id).status == 'in_progress';}
+  function openRun(s,id){return taskRun(s,id).userId == uid() && taskRun(s,id).status == 'in_progress';}
+  function assignment(s,id){return get(/databases/$(database)/documents/schools/$(s)/Assignments/$(id)).data;}
+  function enrolled(s,id){return get(/databases/$(database)/documents/schools/$(s)/ClassStudents/$(uid())).data.classId == assignment(s,id).classId && assignment(s,id).status == 'published';}
+  function answer(s,id,i){return get(/databases/$(database)/documents/schools/$(s)/Answers/$(id + '__' + i)).data.answer.size() > 0;}
+  function seven(s,id){return answer(s,id,'0') && answer(s,id,'1') && answer(s,id,'2') && answer(s,id,'3') && answer(s,id,'4') && answer(s,id,'5') && answer(s,id,'6');}
+  function stage(s,id,c){return get(/databases/$(database)/documents/schools/$(s)/TaskSteps/$(id + '__' + c + '__5')).data.response.size() > 0;}
+  function five(s,id){return stage(s,id,'C') && stage(s,id,'OD') && stage(s,id,'E') && stage(s,id,'TH') && stage(s,id,'INK');}
+  function readyEvidence(s,id){
+   let run=getAfter(/databases/$(database)/documents/schools/$(s)/LearningEvidence/$(request.resource.data.learningRunId)).data;
+   return run.__ownerId==uid() && run.attemptId==id && run.kind=='run' && run.completed==true
+    && run.code==resource.data.code && run.inputData==resource.data.inputData
+    && run.prediction is string && run.prediction.size()>0
+    && run.comparison is string && run.comparison.size()>0
+    && run.explanation is string && run.explanation.size()>0;
+  }
+  function previous(s,id,c){return c == 'C' || (c == 'OD' && stage(s,id,'C')) || (c == 'E' && stage(s,id,'OD')) || (c == 'TH' && stage(s,id,'E')) || (c == 'INK' && stage(s,id,'TH'));}
+
+  // Only the Firebase project owner can approve teachers in the Console (IAM).
+  // A browser can never approve itself or write this collection.
+  match /teacherAccess/{authUid} {
+   allow get: if signed() && request.auth.uid == authUid;
+   allow list, create, update, delete: if false;
+  }
+  match /identities/{authUid} {
+   allow get: if signed() && (request.auth.uid == authUid || owner(resource.data.schoolId));
+   allow create, update: if owner(request.resource.data.schoolId)
+    && request.resource.data.keys().hasOnly(['schoolId','userId','__updatedAt','__createdAt'])
+    && getAfter(/databases/$(database)/documents/schools/$(request.resource.data.schoolId)/Users/$(request.resource.data.userId)).data.authUid == authUid
+    && meta();
+   allow list, delete: if false;
+  }
+  match /schools/{s}/Users/{id} {
+   allow get: if owner(s) || (active(s) && id == uid());
+   allow list: if owner(s);
+   allow create: if owner(s) && request.resource.data.id == id && request.resource.data.__ownerId == id
+    && request.resource.data.authUid is string && request.resource.data.role in ['teacher','student']
+    && (request.resource.data.role == 'student' || id == s)
+    && !request.resource.data.keys().hasAny(['password','passwordHash','passwordSalt','temporaryPassword','teacherAccessCode']) && created();
+   allow update: if meta() && (
+    (owner(s) && request.resource.data.id == resource.data.id && immutableOwner()
+     && request.resource.data.role == resource.data.role
+     && !request.resource.data.keys().hasAny(['password','passwordHash','passwordSalt','temporaryPassword','teacherAccessCode']))
+    || (active(s) && id == uid() && changedOnly(['lastLoginAt','mustChangePassword','__updatedAt'])
+     && request.resource.data.mustChangePassword == false && text(request.resource.data.lastLoginAt,50))
+    || (active(s) && id == uid() && changedOnly(['lastLoginAt','__updatedAt']) && text(request.resource.data.lastLoginAt,50))
+   );
+   allow delete: if false;
+  }
+  match /schools/{s}/{table}/{id} {
+   allow read: if owner(s) && table != 'Users';
+   allow create, update, delete: if owner(s) && table in ['Classes','ClassStudents','Tasks','Assignments','Settings','Attempts','Answers','DiagnosticProfiles','MethodProgress','TaskAttempts','TaskSteps','SkillScores','Events','Corrections','LearningEvidence','TransferProbes','PedagogyReviews','TeacherSolutions','TaskChecks','RegistrationJobs'];
+  }
+  match /schools/{s}/{table}/{id} {
+   allow read: if active(s) && table in ['Classes','Tasks','Assignments','Settings'];
+   allow read: if active(s) && table in ['ClassStudents','Attempts','Answers','DiagnosticProfiles','MethodProgress','TaskAttempts','TaskSteps','SkillScores','Events','Corrections','LearningEvidence','TransferProbes'] && resource.data.__ownerId == uid();
+  }
+  match /schools/{s}/TaskChecks/{id} {allow read: if student(s) && baseline(s);}
+  // TeacherSolutions has no pupil read rule. Solutions are uploaded separately.
+  match /schools/{s}/Attempts/{id} {
+   allow create: if mine(s,request.resource.data) && request.resource.data.userId == uid()
+    && id == uid() + '_' + request.resource.data.attemptType && request.resource.data.id == id
+    && request.resource.data.attemptType in ['baseline','final']
+    && (request.resource.data.attemptType == 'baseline' || (baseline(s) && finalOpen(s)))
+    && request.resource.data.status == 'in_progress' && request.resource.data.totalScore == '' && request.resource.data.teacherComment == ''
+    && !request.resource.data.keys().hasAny(['correctionsOpen'])
+    && request.resource.data.grade == person(s).grade && created();
+   allow update: if mine(s,resource.data) && immutableOwner() && resource.data.status == 'in_progress'
+    && changedOnly(['status','submittedAt','secondsSpent','switches','__updatedAt','__submittedAt'])
+    && request.resource.data.status == 'submitted' && request.resource.data.__submittedAt == request.time
+    && seven(s,id) && meta();
+  }
+  match /schools/{s}/Answers/{id} {
+   function valid(){return mine(s,request.resource.data) && openDiagnostic(s,request.resource.data.attemptId)
+    && request.resource.data.taskIndex is int && request.resource.data.taskIndex >= 0 && request.resource.data.taskIndex <= 6
+    && id == request.resource.data.attemptId + '__' + string(request.resource.data.taskIndex)
+    && request.resource.data.score == '' && request.resource.data.feedback == '' && text(request.resource.data.answer,12000) && meta();}
+   allow create: if valid() && created();
+   allow update: if valid() && immutableOwner() && changedOnly(['answer','__updatedAt','updatedAt']);
+  }
+  match /schools/{s}/DiagnosticProfiles/{id} {
+   function valid(){return mine(s,request.resource.data) && request.resource.data.userId == uid()
+    && request.resource.data.attemptType in ['baseline','final'] && id == uid() + '__' + request.resource.data.attemptType
+    && openDiagnostic(s,uid() + '_' + request.resource.data.attemptType)
+    && text(request.resource.data.surveyJson,100) && text(request.resource.data.testJson,100)
+    && request.resource.data.testScore is int && request.resource.data.testScore >= 0 && request.resource.data.testScore <= 3 && meta();}
+   // Survey/testScore are formative self-checks. Teacher practical grades live in Attempts/Answers.
+   allow create: if valid() && created();
+   allow update: if valid() && immutableOwner() && changedOnly(['surveyJson','testJson','testScore','updatedAt','__updatedAt']);
+  }
+  match /schools/{s}/MethodProgress/{id} {
+   function valid(){return mine(s,request.resource.data) && request.resource.data.userId == uid()
+    && request.resource.data.modelVersion == 5 && request.resource.data.stepIndex in [0,1,2,3,4]
+    && id == uid() + '__' + string(request.resource.data.stepIndex) + '__5'
+    && text(request.resource.data.answer,12000) && request.resource.data.completed is bool && meta();}
+   allow create: if valid() && created();
+   allow update: if valid() && immutableOwner() && changedOnly(['answer','completed','updatedAt','__updatedAt']);
+  }
+  match /schools/{s}/TaskAttempts/{id} {
+   allow create: if mine(s,request.resource.data) && baseline(s) && enrolled(s,request.resource.data.assignmentId)
+    && request.resource.data.userId == uid() && id == uid() + '_' + request.resource.data.assignmentId && request.resource.data.id == id
+    && request.resource.data.status == 'in_progress' && request.resource.data.score == '' && request.resource.data.teacherComment == ''
+    && !request.resource.data.keys().hasAny(['correctionsOpen']) && request.resource.data.pedagogyVersion == 9
+    && text(request.resource.data.code,20000) && created();
+   allow update: if mine(s,resource.data) && immutableOwner() && resource.data.status == 'in_progress' && meta()
+    && ((changedOnly(['code','inputData','output','lastRunAt','__updatedAt'])
+      && text(request.resource.data.code,20000) && text(request.resource.data.inputData,2000) && text(request.resource.data.output,8000))
+     || (changedOnly(['status','submittedAt','learningRunId','__updatedAt','__submittedAt']) && request.resource.data.status == 'submitted'
+      && request.resource.data.__submittedAt == request.time && resource.data.code.size() > 0 && five(s,id) && readyEvidence(s,id)));
+  }
+  match /schools/{s}/TaskSteps/{id} {
+   function valid(){return mine(s,request.resource.data) && openRun(s,request.resource.data.attemptId)
+    && request.resource.data.modelVersion == 5 && request.resource.data.stepCode in ['C','OD','E','TH','INK']
+    && id == request.resource.data.attemptId + '__' + request.resource.data.stepCode + '__5'
+    && request.resource.data.score == '' && request.resource.data.feedback == '' && text(request.resource.data.response,12000)
+    && previous(s,request.resource.data.attemptId,request.resource.data.stepCode) && meta();}
+   allow create: if valid() && created();
+   allow update: if valid() && immutableOwner() && changedOnly(['response','updatedAt','__updatedAt']);
+  }
+  match /schools/{s}/LearningEvidence/{id} {
+   function valid(){return mine(s,request.resource.data) && request.resource.data.userId == uid() && request.resource.data.id == id
+    && openRun(s,request.resource.data.attemptId) && request.resource.data.kind in ['stage','run']
+    && request.resource.data.step in ['C','OD','E','TH','INK'] && text(request.resource.data.detailsJson,120000) && meta();}
+   allow create: if valid() && created();
+   allow update: if valid() && immutableOwner() && changedOnly(['detailsJson','updatedAt','code','inputData','prediction','output','completed','comparison','explanation','__updatedAt']);
+  }
+  match /schools/{s}/Events/{id} {
+   allow create: if mine(s,request.resource.data) && request.resource.data.userId == uid()
+    && diagnostic(s,request.resource.data.attemptId).userId == uid()
+    && request.resource.data.type in ['visibility_hidden','fullscreen_exit','copy_attempt','other'] && text(request.resource.data.value,200) && created();
+  }
+  match /schools/{s}/Corrections/{id} {
+   function source(){return request.resource.data.kind == 'task'?taskRun(s,request.resource.data.sourceId):diagnostic(s,request.resource.data.sourceId);}
+   allow create: if mine(s,request.resource.data) && request.resource.data.userId == uid() && request.resource.data.id == id
+    && source().userId == uid() && source().status == 'graded' && source().correctionsOpen == true
+    && request.resource.data.kind in ['task','diagnostic'] && request.resource.data.status == 'submitted'
+    && request.resource.data.score == '' && request.resource.data.feedback == '' && request.resource.data.reviewedAt == ''
+    && text(request.resource.data.code,20000) && text(request.resource.data.answer,12000) && text(request.resource.data.explanation,4000)
+    && request.resource.data.explanation.size() > 0 && created() && request.resource.data.__submittedAt == request.time;
+  }
+  match /schools/{s}/TransferProbes/{id} {
+   function first(){return get(/databases/$(database)/documents/schools/$(s)/TransferProbes/$(request.resource.data.attemptId + '_immediate')).data;}
+   allow create: if mine(s,request.resource.data) && request.resource.data.userId == uid() && request.resource.data.id == id
+    && id == request.resource.data.attemptId + '_' + request.resource.data.phase
+    && request.resource.data.phase in ['immediate','delayed']
+    && taskRun(s,request.resource.data.attemptId).userId == uid() && taskRun(s,request.resource.data.attemptId).status in ['submitted','graded']
+    && (request.resource.data.phase == 'immediate' || (first().status in ['submitted','reviewed'] && request.time >= first().__submittedAt + duration.value(7,'d')))
+    && request.resource.data.status == 'in_progress' && request.resource.data.scoresJson == '' && request.resource.data.feedback == '' && request.resource.data.reviewedAt == '' && created();
+   allow update: if mine(s,resource.data) && immutableOwner() && resource.data.status == 'in_progress'
+    && changedOnly(['answer','reason','help','status','submittedAt','__updatedAt','__submittedAt'])
+    && request.resource.data.status in ['in_progress','submitted'] && text(request.resource.data.answer,20000) && text(request.resource.data.reason,6000) && text(request.resource.data.help,1000)
+    && (request.resource.data.status == 'in_progress' || (request.resource.data.__submittedAt == request.time && request.resource.data.answer.size() > 0 && request.resource.data.reason.size() > 0 && request.resource.data.help.size() > 0)) && meta();
+  }
+ }
+}

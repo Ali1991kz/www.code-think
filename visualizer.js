@@ -211,7 +211,7 @@
       q('counter').textContent=`${position} / ${result.frames.length-1}`;q('seek').value=position;
       q('explanation').textContent=explanation(f);
       q('operation').hidden=!f.operation;
-      q('operation').textContent=f.operation?(russian?'Подставим значения: ':'Мәндерді қойсақ: ')+f.operation:'';
+      q('operation').textContent=f.operation?(/^print\(/.test(f.operation)?(russian?'На экран добавлено: ':'Экранға қосылды: ')+String(f.output||'').slice(String(result.frames[Math.max(0,position-1)]?.output||'').length).trim():(russian?'Вычисляем: ':'Есептейміз: ')+f.operation):'';
       q('output').textContent=f.output||(russian?'Пока нет результата.':'Әзірге нәтиже жоқ.');
       q('inputCount').textContent=`Кіріс: ${f.inputs.length} мән оқылды`;
       q('codeTrace').innerHTML=result.source.split('\n').map((line,i)=>`<div class="v-trace-line ${f.line===i+1?'v-current-line':''}"><span>${i+1}</span><code>${esc(line)||' '}</code></div>`).join('');

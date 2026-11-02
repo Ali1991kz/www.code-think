@@ -78,7 +78,7 @@
  async function load(names,tx,p={},action=''){
   const tables={},documents=new Map();
   const taskActions=new Set(['startTaskAttempt','saveTaskCode','saveTaskStep','submitTask','saveLearningEvidence','startPrediction','completePrediction','startTransfer']);
-  let target=profile.role==='student'&&taskActions.has(action)?p.attemptId||((action==='startTaskAttempt')?profile.id+'_'+p.assignmentId:''):'';
+  let target=profile.role==='student'&&taskActions.has(action)&&action!=='startTaskAttempt'?p.attemptId||'':'';
   if(profile.role==='student'&&action==='completePrediction'&&p.id){const evidence=await getDoc(path('LearningEvidence',p.id),tx);target=evidence?decode(evidence).attemptId:'';}
   await Promise.all([...new Set(names)].map(async table=>{
    if(EMPTY.has(table)||(profile.role!=='teacher'&&['PedagogyReviews','RegistrationJobs','TeacherSolutions'].includes(table))){tables[table]=[];return;}
@@ -163,7 +163,7 @@
    profile=decode(profileDocument);
   }
  }
- const readOnly=new Set(['me','teacherDashboard','studentWorkspace','pedagogyWorkspace','correctionWorkspace','teacherSolution','getTaskTests','checkTaskOutputs']);
+ const readOnly=new Set(['schoolWorkspace','me','teacherDashboard','studentWorkspace','pedagogyWorkspace','correctionWorkspace','teacherSolution','getTaskTests','checkTaskOutputs']);
  async function learning(action,p){
   const names=window.CT_CORE.dependencies[action];if(!names)throw Error('Әрекет табылмады. / Действие не найдено.');
   let tx;
@@ -184,14 +184,16 @@
    if(requestedLogin&&item.login!==requestedLogin)throw Error('Логин өзгерді. Тіркеуді қайта бастаңыз. / Логин изменён. Повторите регистрацию.');
    return item;
   }
+  const capacity=registrationCapacity();if(!capacity.remaining){const e=Error('Тіркеу шегіне жақындадық. Кейінірек қалған оқушыларды жалғастырыңыз. / Достигнут безопасный предел регистрации. Продолжите оставшихся позже.');e.code='REGISTRATION_PAUSED';e.retryAt=capacity.retryAt;throw e;}
   const login=requestedLogin||'s'+grade+'-'+random().slice(0,14),pw=password();
   const r=await auth('signUp',{email:alias(login),password:pw,returnSecureToken:true});
-  const item={login,temporaryPassword:pw,authUid:r.localId,discardToken:r.idToken};pendingAccounts.set(cacheKey,item);return item;
+  registrationRecorded();const item={login,temporaryPassword:pw,authUid:r.localId,discardToken:r.idToken};pendingAccounts.set(cacheKey,item);return item;
  }
  async function discard(item){try{await auth('delete',{idToken:item.discardToken});}catch{}pendingAccounts.delete(item.cacheKey);}
  async function importOne(row,job){
   const name=String(row.name||'').trim(),grade=String(row.grade||''),className=String(row.className||'').trim();
   if(!name||name.length>150||!className||className.length>40||!['7','8'].includes(grade))throw Error('Аты-жөні, 7/8 деңгейі және сынып атауы қажет. / Нужны ФИО, параллель 7/8 и класс.');
+  const classGrade=/^\s*([78])/.exec(className);if(classGrade&&classGrade[1]!==grade)throw Error('Сынып атауы мен деңгейі сәйкес емес. / Название класса и параллель не совпадают.');
   const customLogin=Object.hasOwn(row,'login'),requestedLogin=customLogin?norm(row.login):'';
   if(customLogin&&!/^[a-z0-9][a-z0-9._-]{2,31}$/.test(requestedLogin))throw Error('Логин: 3–32 таңба, латын әріптері, сандар, нүкте, _ немесе -. / Логин: 3–32 символа, латинские буквы, цифры, точка, _ или -.');
   if(customLogin&&(requestedLogin.includes('..')||requestedLogin.endsWith('.')))throw Error('Логин нүктемен аяқталмасын және нүктелер қатар келмесін. / Логин не должен заканчиваться точкой или содержать две точки подряд.');
@@ -220,7 +222,7 @@
   if(!Array.isArray(p.students)||!p.students.length||p.students.length>20||!/^[-a-zA-Z0-9_]{8,100}$/.test(p.requestId||''))throw Error('Импорт сұрауын жаңартыңыз. / Повторите запрос импорта.');
   const results=[];for(let i=0;i<p.students.length;i++){
    const row={...p.students[i],row:p.students[i].row||i+2};
-   try{results.push(await importOne(row,p.requestId));}catch(e){results.push({row:row.row,name:row.name,ok:false,error:friendly(e).message});}
+   try{results.push(await importOne(row,p.requestId));}catch(e){const paused=e.code==='REGISTRATION_PAUSED'||e.code==='TOO_MANY_ATTEMPTS_TRY_LATER'||e.message==='TOO_MANY_ATTEMPTS_TRY_LATER';results.push({row:row.row,name:row.name,ok:false,deferred:paused,retryAt:e.retryAt||Date.now()+3600000,error:friendly(e).message});if(paused){for(const rest of p.students.slice(i+1))results.push({row:rest.row,name:rest.name,ok:false,deferred:true,retryAt:e.retryAt||Date.now()+3600000,error:friendly(e).message});break;}}
   }
   const fresh=results.filter(x=>x.ok&&!x.alreadyProcessed);return {created:fresh.length,failed:results.filter(x=>!x.ok).length,results:results.filter(x=>!x.alreadyProcessed),alreadyProcessed:results.every(x=>x.alreadyProcessed)};
  }
@@ -275,9 +277,66 @@
   const writes=[];for(const m of list){for(const table of ['TeacherSolutions','TaskChecks']){const name=path(table,m.sourceKey),old=await getDoc(name);const obj=table==='TeacherSolutions'?m:Object.fromEntries(Object.entries(m).filter(([k])=>!['sampleCode','note'].includes(k)));writes.push(documentWrite(name,obj,old));}}
   await commit(writes);return {installed:list.length};
  }
+ // One snapshot per screen; avoid re-reading the same collections for four calls.
+ async function schoolWorkspace(p){
+  const teacher=profile.role==='teacher',view=String(p.view||'overview');
+  let names=teacher?['Users','Classes','ClassStudents','Tasks','Assignments','Attempts','TaskAttempts','Settings','SkillScores']:['Users','Classes','ClassStudents','Tasks','Assignments','Attempts','Answers','TaskAttempts','TaskSteps','Settings','SkillScores','DiagnosticProfiles','MethodProgress','Corrections','TransferProbes'];
+  if(teacher&&view==='diagnostics')names.push('Answers','DiagnosticProfiles');
+  if(teacher&&view==='work')names.push('TaskSteps');
+  if(teacher&&view==='corrections')names.push('Corrections','Answers','TaskSteps');
+  if((teacher&&view==='pedagogy')||(!teacher&&['task','transfer','probe','results'].includes(view)))names.push('LearningEvidence','TransferProbes','PedagogyReviews');
+  const state=await load(names,null,p,'schoolWorkspace');
+  const core=window.CT_CORE.create(state.tables,profile);
+  const result=teacher?{dashboard:core.run('teacherDashboard'),teacherWS:core.run('teacherWorkspace'),corrections:core.run('correctionWorkspace')}:{mine:core.run('me'),workspace:core.run('studentWorkspace'),corrections:core.run('correctionWorkspace')};
+  result.ped=(names.includes('LearningEvidence')||names.includes('TransferProbes'))?core.run('pedagogyWorkspace'):{evidence:[],probes:[],reviews:[]};
+  await commit(writesFor(state,core));return result;
+ }
+ const backupTables=[...Object.keys(window.CT_CORE.schemas).filter(n=>n!=='Sessions'),'TeacherSolutions','TaskChecks'];
+ async function exportBackup(){
+  if(profile.role!=='teacher')throw Error('Мұғалім құқығы қажет. / Нужны права учителя.');
+  const state=await load(backupTables,{optimistic:true}),tables={};
+  for(const [table,rows] of Object.entries(state.tables))tables[table]=rows.map(r=>Object.fromEntries(Object.entries(r).filter(([k])=>!k.startsWith('__')&&!['password','passwordHash','passwordSalt','temporaryPassword','accessCodeHash','teacherAccessCode'].includes(k))));
+  // Keep document keys for rows without an id (composite keys and material IDs).
+  for(const table of backupTables)(tables[table]||[]).forEach((r,i)=>{const old=state.tables[table][i];r.backupKey=rowKey(table,old);if(old.__ownerId)r.backupOwner=old.__ownerId;if(old.__submittedAt)r.backupSubmittedAt=old.__submittedAt;});
+  const checksum=Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256',new TextEncoder().encode(JSON.stringify(tables))))).map(b=>b.toString(16).padStart(2,'0')).join('');
+  return {format:'code-think-learning-backup',version:1,projectId:project,schoolId:identity.schoolId,createdAt:new Date().toISOString(),checksum,tables};
+ }
+ async function restoreBackup(p){
+  if(profile.role!=='teacher')throw Error('Мұғалім құқығы қажет. / Нужны права учителя.');
+  const b=p.backup;
+  if(!b||b.format!=='code-think-learning-backup'||b.version!==1||b.projectId!==project||b.schoolId!==identity.schoolId)throw Error('Бұл көшірме осы жоба мен мұғалімге тиесілі емес. / Копия относится к другому проекту или учителю.');
+  const checksum=Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256',new TextEncoder().encode(JSON.stringify(b.tables))))).map(n=>n.toString(16).padStart(2,'0')).join('');
+  if(checksum!==b.checksum)throw Error('Көшірме өзгерген немесе бүлінген. / Копия изменена или повреждена.');
+  const entries=Object.entries(b.tables||{});if(entries.some(([n,rs])=>!backupTables.includes(n)||!Array.isArray(rs))||entries.reduce((n,[,rs])=>n+rs.length,0)>50000)throw Error('Көшірме құрылымы жарамсыз. / Неверная структура копии.');
+  const state=await load(backupTables,{optimistic:true}),writes=[];let skipped=0,accounts=0;
+  const users=new Set((state.tables.Users||[]).map(x=>x.id));
+  for(const [table,rows]of entries){
+   if(table==='Users'){accounts+=rows.length;continue;} // Authentication and credentials are never restored from a file.
+   for(const item of rows){
+    const id=String(item.backupKey||rowKey(table,item)||'');if(!id||id.includes('/')||id.length>1400)throw Error('Көшірмедегі жазба кілті қате. / Неверный ключ записи.');
+    const name=path(table,id);if(state.documents.has(name)){skipped++;continue;}
+    if(item.userId&&!users.has(item.userId)){skipped++;continue;}
+    if(item.backupOwner&&!users.has(item.backupOwner)){skipped++;continue;}
+    const raw=Object.fromEntries(Object.entries(item).filter(([k])=>!k.startsWith('backup')&&!k.startsWith('__')&&!['password','temporaryPassword','passwordHash','passwordSalt','accessCodeHash','teacherAccessCode'].includes(k)));
+    if(item.backupOwner)raw.__ownerId=item.backupOwner;
+    const obj=['TeacherSolutions','TaskChecks'].includes(table)?raw:clean(table,raw,state.tables);
+    const write=documentWrite(name,obj,null);
+    if(item.backupSubmittedAt){if(!Number.isFinite(Date.parse(item.backupSubmittedAt)))throw Error('Уақыт мәні қате. / Неверная дата.');write.update.fields.__submittedAt={timestampValue:item.backupSubmittedAt};}
+    writes.push(write);
+   }
+  }
+  if(p.preview!==false)return {ready:writes.length,skipped,accounts,mode:'missing-only'};
+  let restored=0;for(let i=0;i<writes.length;i+=25){await commit(writes.slice(i,i+25));restored+=Math.min(25,writes.length-i);}
+  return {restored,skipped,accounts,mode:'missing-only'};
+ }
+ const quotaStore=typeof localStorage!=='undefined'?localStorage:sessionStorage;
+ function registrationEvents(){try{return JSON.parse(quotaStore.getItem('ct-registration:'+project)||'[]').filter(x=>Number(x)>Date.now()-3600000);}catch{return [];}}
+ function registrationCapacity(){const times=registrationEvents();return {remaining:Math.max(0,80-times.length),retryAt:times.length?Math.min(...times)+3600000:Date.now()};}
+ function registrationRecorded(){const times=registrationEvents();times.push(Date.now());try{quotaStore.setItem('ct-registration:'+project,JSON.stringify(times));}catch{}}
+
  async function dispatch(action,p={}){
   if(!project||!key)throw Error('Firebase config.js баптауларын толтырыңыз. / Заполните Firebase config.js.');
-  if(action==='ping')return {version:'11.0.2',backend:'firebase-direct',plan:'Spark',customStudentLogins:true};
+  if(action==='ping')return {version:'11.1.0',backend:'firebase-direct',plan:'Spark',customStudentLogins:true};
   if(action==='logout'){clear();return {loggedOut:true};}
   if(action==='setupTeacher')return setupTeacher(p);
   if(action==='login'){
@@ -290,11 +349,14 @@
   await current();
   if(teacherOnly.has(action)&&profile.role!=='teacher')throw Error('Мұғалім құқығы қажет. / Нужны права учителя.');
   if(profile.mustChangePassword&&!['me','changePassword'].includes(action))throw Error('Алдымен уақытша құпиясөзді ауыстырыңыз. / Сначала смените временный пароль.');
+  if(action==='schoolWorkspace')return schoolWorkspace(p);
+  if(action==='exportBackup')return exportBackup();
+  if(action==='restoreBackup')return restoreBackup(p);
   if(action==='importStudents')return importStudents(p);
   if(action==='bulkManageStudents')return bulk(p);
   if(action==='changePassword')return changePassword(p);
   if(action==='installMaterials')return installMaterials(p);
   return learning(action,p);
  }
- window.CT_FIREBASE={call(action,p={}){const task=queue.then(()=>dispatch(action,p));queue=task.catch(()=>{});return task.catch(e=>{throw friendly(e);});},invalidate:()=>readCache.clear(),status:()=>({signedIn:!!session,project,version:'11.0.2',customStudentLogins:true}),_test:local?{val,plain,rowKey,decode,root}:undefined};
+ window.CT_FIREBASE={call(action,p={}){const task=queue.then(()=>dispatch(action,p));queue=task.catch(()=>{});return task.catch(e=>{throw friendly(e);});},invalidate:()=>readCache.clear(),status:()=>({signedIn:!!session,project,version:'11.1.0',customStudentLogins:true}),_test:local?{val,plain,rowKey,decode,root}:undefined};
 })();

@@ -1,0 +1,103 @@
+{
+  "indexes": [
+    {
+      "collectionGroup": "TaskAttempts",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {
+          "fieldPath": "__ownerId",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "id",
+          "order": "ASCENDING"
+        }
+      ]
+    },
+    {
+      "collectionGroup": "Attempts",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {
+          "fieldPath": "__ownerId",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "id",
+          "order": "ASCENDING"
+        }
+      ]
+    },
+    {
+      "collectionGroup": "TaskSteps",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {
+          "fieldPath": "__ownerId",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "attemptId",
+          "order": "ASCENDING"
+        }
+      ]
+    },
+    {
+      "collectionGroup": "LearningEvidence",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {
+          "fieldPath": "__ownerId",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "attemptId",
+          "order": "ASCENDING"
+        }
+      ]
+    },
+    {
+      "collectionGroup": "TransferProbes",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {
+          "fieldPath": "__ownerId",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "attemptId",
+          "order": "ASCENDING"
+        }
+      ]
+    },
+    {
+      "collectionGroup": "Answers",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {
+          "fieldPath": "__ownerId",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "attemptId",
+          "order": "ASCENDING"
+        }
+      ]
+    },
+    {
+      "collectionGroup": "Events",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {
+          "fieldPath": "__ownerId",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "attemptId",
+          "order": "ASCENDING"
+        }
+      ]
+    }
+  ],
+  "fieldOverrides": []
+}

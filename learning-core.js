@@ -2,6 +2,9 @@
 (() => {
 'use strict';
 const SCHEMAS={"LearningEvidence":["id","userId","attemptId","kind","step","detailsJson","updatedAt"],"TransferProbes":["id","userId","attemptId","sourceKey","phase","status","promptJson","answer","reason","help","createdAt","submittedAt","scoresJson","feedback","reviewedAt","correctionId"],"PedagogyReviews":["id","teacherId","key","reference","note","updatedAt"],"Users":["id","login","passwordHash","passwordSalt","mustChangePassword","name","grade","className","role","active","createdAt","lastLoginAt","accessCodeHash","codeIssuedAt","teacherAccessCode"],"Attempts":["id","userId","grade","status","startedAt","submittedAt","switches","secondsSpent","totalScore","teacherComment","attemptType","correctionsOpen"],"Answers":["attemptId","taskIndex","answer","score","feedback","updatedAt"],"DiagnosticProfiles":["userId","surveyJson","testJson","testScore","updatedAt","attemptType"],"MethodProgress":["userId","stepIndex","answer","completed","updatedAt","modelVersion"],"Classes":["id","name","grade","teacherId","active","createdAt"],"ClassStudents":["classId","userId","createdAt"],"Tasks":["id","title","grade","topic","scenario","difficulty","starterCode","testCasesJson","active","createdBy","createdAt","sourceKey"],"Assignments":["id","classId","taskId","title","dueAt","status","createdBy","createdAt"],"TaskAttempts":["id","assignmentId","userId","status","code","inputData","output","lastRunAt","submittedAt","score","teacherComment","correctionsOpen","pedagogyVersion"],"TaskSteps":["attemptId","stepCode","response","score","feedback","updatedAt","modelVersion"],"SkillScores":["userId","sourceType","sourceId","skillKey","score","updatedAt"],"Events":["attemptId","userId","type","value","createdAt"],"Corrections":["id","userId","kind","sourceId","taskIndex","answer","code","inputData","output","explanation","status","score","feedback","createdAt","reviewedAt","requestId"],"Settings":["key","value"]},ROUTES={"me":"myData_","teacherDashboard":"teacherDashboard_","teacherWorkspace":"teacherWorkspace_","studentWorkspace":"studentWorkspace_","pedagogyWorkspace":"pedagogyWorkspace_","correctionWorkspace":"correctionWorkspace_","saveDiagnosticProfile":"saveDiagnosticProfile_","startAttempt":"startAttempt_","saveAnswer":"saveAnswer_","submitAttempt":"submitAttempt_","recordEvent":"recordEvent_","saveMethodStep":"saveMethodStep_","startTaskAttempt":"startTaskAttempt_","saveTaskStep":"saveTaskStep_","saveTaskCode":"saveTaskCode_","submitTask":"submitTask_","createClass":"createClass_","createTask":"createTask_","createAssignment":"createAssignment_","enrollStudent":"enrollStudent_","updateStudent":"updateStudent_","bulkCommentAttempts":"bulkCommentAttempts_","bulkGradeAttempts":"bulkGradeAttempts_","setFinalDiagnosticOpen":"setFinalDiagnosticOpen_","gradeAttempt":"gradeAttempt_","gradeTask":"gradeTask_","teacherSolution":"teacherSolution_","getTaskTests":"taskTests_","checkTaskOutputs":"checkTaskOutputs_","releaseCorrections":"releaseCorrections_","submitCorrection":"submitCorrection_","gradeCorrection":"gradeCorrection_","saveLearningEvidence":"saveLearningEvidence_","startPrediction":"startPrediction_","completePrediction":"completePrediction_","startTransfer":"startTransfer_","saveTransfer":"saveTransfer_","gradeTransfer":"gradeTransfer_","savePedagogyReview":"savePedagogyReview_"},DEPENDENCIES={"me":["Users","Attempts","Answers","MethodProgress","SkillScores","DiagnosticProfiles","Settings"],"teacherDashboard":["Users","Attempts","Answers","SkillScores","TaskAttempts","Settings","Classes","ClassStudents"],"teacherWorkspace":["Users","Classes","Tasks","Assignments","TaskAttempts","TaskSteps","ClassStudents"],"studentWorkspace":["Users","ClassStudents","Classes","Assignments","Tasks","TaskAttempts","TaskSteps"],"pedagogyWorkspace":["Users","LearningEvidence","TransferProbes","PedagogyReviews","Classes","ClassStudents"],"correctionWorkspace":["Users","Corrections","Attempts","Answers","TaskAttempts","Assignments","Tasks","TaskSteps","Classes","ClassStudents"],"saveDiagnosticProfile":["Users","DiagnosticProfiles"],"startAttempt":["Users","Attempts","Settings"],"saveAnswer":["Users","Answers","Attempts"],"submitAttempt":["Users","Answers","Attempts"],"recordEvent":["Users","Attempts","Events"],"saveMethodStep":["Users","MethodProgress"],"startTaskAttempt":["Users","Assignments","ClassStudents","TaskAttempts","TaskSteps","Tasks","Attempts"],"saveTaskStep":["Users","TaskSteps","TaskAttempts"],"saveTaskCode":["Users","TaskAttempts"],"submitTask":["Users","TaskSteps","TaskAttempts","LearningEvidence"],"createClass":["Users","Classes","Tasks","Assignments"],"createTask":["Users","Tasks","Classes"],"createAssignment":["Users","Classes","Tasks","Assignments"],"enrollStudent":["Users","Classes","ClassStudents","Tasks","Assignments"],"updateStudent":["Users"],"bulkCommentAttempts":["Users","Attempts"],"bulkGradeAttempts":["Users","Attempts","Answers","SkillScores","Classes","ClassStudents"],"setFinalDiagnosticOpen":["Users","Settings"],"gradeAttempt":["Users","Attempts","Answers","SkillScores","Classes","ClassStudents"],"gradeTask":["Users","TaskAttempts","Assignments","TaskSteps","SkillScores"],"teacherSolution":["Users","Tasks","ClassStudents","Assignments","Attempts"],"getTaskTests":["Users","Tasks","ClassStudents","Assignments","Attempts"],"checkTaskOutputs":["Users","Tasks","ClassStudents","Assignments","Attempts"],"releaseCorrections":["Users","Attempts","TaskAttempts","Classes","ClassStudents"],"submitCorrection":["Users","Corrections","Attempts","Answers","TaskAttempts","Assignments","Tasks","TaskSteps","Classes","ClassStudents"],"gradeCorrection":["Users","Corrections","Classes","ClassStudents"],"saveLearningEvidence":["Users","LearningEvidence","TaskAttempts"],"startPrediction":["Users","LearningEvidence","TaskAttempts"],"completePrediction":["Users","LearningEvidence","TaskAttempts"],"startTransfer":["Users","TransferProbes","Corrections","Assignments","Tasks","TaskAttempts"],"saveTransfer":["Users","TransferProbes"],"gradeTransfer":["Users","TransferProbes","Classes","ClassStudents"],"savePedagogyReview":["Users","PedagogyReviews"]};
+SCHEMAS.LearningEvidence.push('code','inputData','prediction','output','completed','comparison','explanation');
+SCHEMAS.TaskAttempts.push('learningRunId');
+DEPENDENCIES.studentWorkspace.push('TransferProbes');
 function create(tables,user,payload={},materials=[]) {
 const CT_PEDAGOGY=window.CT_PEDAGOGY,CT_MATERIALS=materials;
 function requireStudent_(user) { if (user.role !== 'student') throw new Error('Оқушы аккаунты қажет.'); return user; }
@@ -37,6 +40,15 @@ function syncGradeTasksToClass_(cls) {
   return created;
 }
 function normalize_(v) { return String(v || '').trim().toLowerCase(); }
+function relatedAttempt_(assignment,attempts,steps){
+  const related=new Set(rows_('Assignments').filter(x=>x.taskId===assignment.taskId).map(x=>x.id));
+  const own=attempts.filter(x=>x.userId===user.id&&related.has(x.assignmentId));
+  const exact=own.find(x=>x.assignmentId===assignment.id);
+  const task=rows_('Tasks').find(x=>x.id===assignment.taskId);
+  const hasWork=exact&&(exact.status!=='in_progress'||exact.lastRunAt||exact.inputData||exact.output||String(exact.code||'')!==String(task?.starterCode||'')||steps.some(x=>x.attemptId===exact.id&&String(x.response||'').trim()));
+  const old=own.filter(x=>x!==exact).sort((a,b)=>(['submitted','graded'].includes(b.status)?1:0)-(['submitted','graded'].includes(a.status)?1:0)||String(b.lastRunAt||b.submittedAt||'').localeCompare(String(a.lastRunAt||a.submittedAt||'')))[0];
+  return hasWork?exact:(old||exact||null);
+}
 function savePedagogyReview_(teacher,p){
   const key=pedText_(p.key,50);
   if(!CT_PEDAGOGY.tasks.some(x=>x.sourceKey===key)&&!['diagnostic-7','diagnostic-8','pilot'].includes(key))pedError_('Өлшем табылмады.','Критерий не найден.');
@@ -102,20 +114,21 @@ function completePrediction_(user,p){
     d.output=String(p.output||'').slice(0,8000);d.completed=true;d.executedAt=new Date().toISOString();
   }else if(p.phase==='reflection'){
     if(!d.completed)pedError_('Алдымен кодты орында.','Сначала выполни код.');
+    const a=pedOwned_(user,r.attemptId);if(String(d.code).trim()!==String(a.code).trim()||String(d.input)!==String(a.inputData||''))pedError_('Код немесе кіріс өзгерді. Жаңа нұсқаға болжам жазып, қайта орында.','Код или ввод изменён. Сделай прогноз и выполни новую версию.');
     d.comparison=pedText_(p.comparison);d.explanation=pedText_(p.explanation);
     if(!d.comparison||!d.explanation)pedError_('Салыстыру мен себебін жаз.','Запиши сравнение и объяснение.');
   }else pedError_('Әрекет қате.','Неверное действие.');
-  updateByKey_('LearningEvidence','id',r.id,{detailsJson:JSON.stringify(d),updatedAt:new Date().toISOString()});
+  updateByKey_('LearningEvidence','id',r.id,{detailsJson:JSON.stringify(d),code:d.code,inputData:d.input,prediction:d.prediction,output:d.output||'',completed:!!d.completed,comparison:d.comparison||'',explanation:d.explanation||'',updatedAt:new Date().toISOString()});
   return {saved:true};
 }
 function pedOwned_(user,id){requireStudent_(user);const a=ownedTaskAttempt_(user,id);if(a.status!=='in_progress')pedError_('Жұмыс тапсырылған.','Работа уже сдана.');return a;}
 function startPrediction_(user,p){
   const a=pedOwned_(user,p.attemptId),prediction=pedText_(p.prediction);
   if(!prediction)pedError_('Алдымен нәтиже туралы болжам жаз.','Сначала запиши прогноз результата.');
-  const code=pedText_(p.code,20000),input=String(p.input||'').slice(0,2000);
+  const code=String(p.code||'').slice(0,20000),input=String(p.input||'').slice(0,2000);
   if(!code)pedError_('Кодты жаз.','Напиши код.');
   const record={id:id_('EVD'),userId:user.id,attemptId:a.id,kind:'run',step:'TH',detailsJson:JSON.stringify({code,input,prediction,mode:pedText_(p.mode,30),hints:Math.max(0,Math.min(3,Number(p.hints)||0)),completed:false}),updatedAt:new Date().toISOString()};
-  append_('LearningEvidence',record);return record;
+  Object.assign(record,{code,inputData:input,prediction,output:'',completed:false,comparison:'',explanation:''});append_('LearningEvidence',record);return record;
 }
 function saveLearningEvidence_(user,p){
   const a=pedOwned_(user,p.attemptId),step=pedText_(p.step,8);
@@ -235,7 +248,7 @@ function gradeTask_(teacher, payload) {
   return { graded: true, score: total };
 }
 function updateSkillScores_(userId, sourceId, stepScores) {
-  const map = { understanding: ['C'], organization: ['OD'], algorithm: ['OD'], coding: ['E'], debugging: ['TH'], explanation: ['INK'], transfer: ['INK'] };
+  const map = { understanding: ['C'], organization: ['OD'], algorithm: ['OD'], coding: ['E'], debugging: ['TH'], explanation: ['INK'] };
   Object.keys(map).forEach(skill => {
     const values = map[skill].map(k => clamp_(stepScores[k], 0, 3));
     const score = values.reduce((a, b) => a + b, 0) / values.length;
@@ -257,7 +270,7 @@ function gradeAttempt_(_teacher, payload) {
     upsertComposite_('Answers', x => x.attemptId === attempt.id && Number(x.taskIndex) === i, data);
   }
   updateByKey_('Attempts', 'id', attempt.id, { status: 'graded', totalScore: total, teacherComment: String(payload.teacherComment || '').slice(0, 2000) });
-  const diagnosticMap = { understanding: scores[0], organization: scores[1], algorithm: (Number(scores[2] || 0) + Number(scores[4] || 0)) / 2, coding: scores[3], debugging: scores[5], explanation: scores[6], transfer: scores[6] };
+  const diagnosticMap = { understanding: scores[0], organization: scores[1], algorithm: (Number(scores[2] || 0) + Number(scores[4] || 0)) / 2, coding: scores[3], debugging: scores[5], explanation: scores[6] };
   Object.keys(diagnosticMap).forEach(skill => upsertComposite_('SkillScores', x => x.userId === attempt.userId && x.sourceId === attempt.id && x.skillKey === skill, { userId: attempt.userId, sourceType: 'diagnostic', sourceId: attempt.id, skillKey: skill, score: clamp_(diagnosticMap[skill], 0, 3), updatedAt: new Date().toISOString() }));
   return { graded: true, totalScore: total };
 }
@@ -341,12 +354,12 @@ function submitTask_(user, payload) {
   const attempt = ownedTaskAttempt_(user, payload.attemptId);
   if (attempt.status !== 'in_progress') throw new Error('Бұл тапсырма бұрын тапсырылған.');
   const steps = rows_('TaskSteps').filter(x => x.attemptId === attempt.id && String(x.modelVersion) === '5' && String(x.response || '').trim());
-  validatePedagogy_(attempt);
+  const learningRunId=validatePedagogy_(attempt);
   const completed = new Set(steps.map(x => x.stepCode));
   const missing = ['C','OD','E','TH','INK'].filter(code => !completed.has(code));
   if (missing.length) throw new Error('Барлық 5 кезеңді толық орындаңыз.');
   if (!String(attempt.code || '').trim()) throw new Error('Python кодын жазып, сақтаңыз.');
-  updateByKey_('TaskAttempts', 'id', attempt.id, { status: 'submitted', submittedAt: new Date().toISOString() });
+  updateByKey_('TaskAttempts', 'id', attempt.id, { status: 'submitted', submittedAt: new Date().toISOString(),...(learningRunId?{learningRunId}:{}) });
   return { submitted: true };
 }
 function validatePedagogy_(attempt){
@@ -356,8 +369,9 @@ function validatePedagogy_(attempt){
     const r=evidence.find(x=>x.kind==='stage'&&x.step===step),d=r?JSON.parse(r.detailsJson):{};
     if(!d.fields||d.fields.length!==2||d.fields.some(x=>!String(x).trim()))pedError_('Әр кезеңдегі екі сұраққа жауап бер.','Ответь на два вопроса каждого этапа.');
   });
-  const run=evidence.filter(x=>x.kind==='run').map(x=>JSON.parse(x.detailsJson)).find(d=>d.completed&&d.code===pedText_(attempt.code,20000)&&d.input===String(attempt.inputData||'')&&d.comparison&&d.explanation);
+  const run=evidence.filter(x=>x.kind==='run').find(r=>{const d=JSON.parse(r.detailsJson);return d.completed&&String(d.code).trim()===String(attempt.code).trim()&&d.input===String(attempt.inputData||'')&&String(d.comparison||'').trim()&&String(d.explanation||'').trim();});
   if(!run)pedError_('Соңғы код үшін болжам, орындау, салыстыру және түсіндіруді аяқта.','Для последнего кода заверши прогноз, выполнение, сравнение и объяснение.');
+  const d=JSON.parse(run.detailsJson);updateByKey_('LearningEvidence','id',run.id,{code:String(attempt.code),inputData:String(attempt.inputData||''),prediction:d.prediction,output:d.output||'',completed:true,comparison:d.comparison,explanation:d.explanation,updatedAt:new Date().toISOString()});return run.id;
 }
 function saveTaskCode_(user, payload) {
   requireStudent_(user);
@@ -390,7 +404,7 @@ function startTaskAttempt_(user, payload) {
   if (!assignment) throw new Error('Тапсырма табылмады.');
   const enrolled = rows_('ClassStudents').some(x => x.userId === user.id && x.classId === assignment.classId);
   if (!enrolled) throw new Error('Бұл тапсырма сіздің сыныбыңызға берілмеген.');
-  const existing = rows_('TaskAttempts').find(x => x.assignmentId === assignment.id && x.userId === user.id);
+  const existing=relatedAttempt_(assignment,rows_('TaskAttempts'),rows_('TaskSteps'));
   if (existing) { existing.steps = rows_('TaskSteps').filter(x => x.attemptId === existing.id); return existing; }
   const task = rows_('Tasks').find(x => x.id === assignment.taskId);
   if (!task) throw new Error('Тапсырма мазмұны табылмады.');
@@ -464,7 +478,7 @@ function saveDiagnosticProfile_(user, payload) {
   const test = Array.isArray(payload.test) ? payload.test.slice(0, 3) : [];
   if (survey.length !== 3 || survey.some(x => ![1,2,3].includes(Number(x)))) throw new Error('Сауалнама толық толтырылмаған.');
   if (test.length !== 3 || test.some(x => ![0,1,2].includes(Number(x)))) throw new Error('Тест жауаптары толық емес.');
-  const keys = { '7': [1, 1, 0], '8': [0, 1, 1] };
+  const keys = attemptType==='final'?{ '7': [2, 0, 1], '8': [1, 2, 0] }:{ '7': [1, 1, 0], '8': [0, 1, 1] };
   const score = test.reduce((sum, value, index) => sum + (Number(value) === keys[String(user.grade)][index] ? 1 : 0), 0);
   upsertComposite_('DiagnosticProfiles', x => x.userId === user.id && diagnosticType_(x.attemptType) === attemptType, { userId: user.id, attemptType, surveyJson: JSON.stringify(survey), testJson: JSON.stringify(test), testScore: score, updatedAt: new Date().toISOString() });
   return { saved: true, testScore: score };
@@ -487,11 +501,13 @@ function studentWorkspace_(user) {
   assignments.forEach(a => {
     const task = tasks.find(t => t.id === a.taskId);
     a.task = task ? publicTask_(task) : null;
-    const attempt = attempts.find(x => x.assignmentId === a.id) || null;
+    const attempt=relatedAttempt_(a,attempts,steps);
     if (attempt) attempt.steps = steps.filter(s => s.attemptId === attempt.id && (String(s.modelVersion) === '5' || ['C','OD','E','TH','INK'].includes(String(s.stepCode))));
     a.attempt = attempt;
   });
-  return { classes, assignments };
+  const visible=new Set(assignments.map(x=>x.attempt?.id).filter(Boolean));
+  const history=attempts.filter(x=>!visible.has(x.id)).map(at=>{const a=rows_('Assignments').find(x=>x.id===at.assignmentId);return a?{...a,task:tasks.find(x=>x.id===a.taskId),attempt:{...at,steps:steps.filter(x=>x.attemptId===at.id)},archived:true}:null;}).filter(x=>x&&x.task);
+  return { classes, assignments, history, transferProbes:rows_('TransferProbes').filter(x=>x.userId===user.id) };
 }
 function teacherWorkspace_(teacher) {
   syncStudentsToClasses_(teacher);
