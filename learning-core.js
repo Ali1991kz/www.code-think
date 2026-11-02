@@ -9,7 +9,7 @@ function create(tables,user,payload={},materials=[]) {
 const CT_PEDAGOGY=window.CT_PEDAGOGY,CT_MATERIALS=materials;
 function requireStudent_(user) { if (user.role !== 'student') throw new Error('Оқушы аккаунты қажет.'); return user; }
 function requireTeacher_(user) { if (user.role !== 'teacher') throw new Error('Мұғалім құқығы қажет.'); return user; }
-function publicUser_(u) { return { id: u.id, login: u.login, name: u.name, grade: String(u.grade || ''), className: u.className || '', role: u.role, active: String(u.active).toLowerCase() === 'true', mustChangePassword: String(u.mustChangePassword).toLowerCase() === 'true', lastLoginAt: u.lastLoginAt || '', hasAccessCode: Boolean(u.accessCodeHash) }; }
+function publicUser_(u) { return { deletedAt:u.deletedAt||'', id: u.id, login: u.login, name: u.name, grade: String(u.grade || ''), className: u.className || '', role: u.role, active: String(u.active).toLowerCase() === 'true', mustChangePassword: String(u.mustChangePassword).toLowerCase() === 'true', lastLoginAt: u.lastLoginAt || '', hasAccessCode: Boolean(u.accessCodeHash) }; }
 function enrollStudentDirect_(cls, user) {
   deleteRows_('ClassStudents', x => x.userId === user.id);
   append_('ClassStudents', { classId: cls.id, userId: user.id, createdAt: new Date().toISOString() });
@@ -528,7 +528,7 @@ function teacherWorkspace_(teacher) {
     });
   });
   const enrollments = rows_('ClassStudents');
-  classes.forEach(c => c.studentIds = enrollments.filter(e => e.classId === c.id).map(e => e.userId));
+  classes.forEach(c => c.studentIds = enrollments.filter(e => e.classId === c.id && !users.find(u=>u.id===e.userId)?.deletedAt).map(e => e.userId));
   return { classes, tasks: tasks.map(publicTask_), assignments };
 }
 function syncStudentsToClasses_(teacher) {
@@ -542,7 +542,8 @@ function syncStudentsToClasses_(teacher) {
 }
 function teacherDashboard_(teacher) {
   const ownIds = new Set(teacherStudents_(teacher).map(x => x.id));
-  const users = rows_('Users').filter(x => ownIds.has(x.id)).map(u => Object.assign(publicUser_(u), {accessCode: u.teacherAccessCode || ''}));
+  const allVisibleUsers = rows_('Users').filter(x => ownIds.has(x.id)).map(u => Object.assign(publicUser_(u), {accessCode: u.teacherAccessCode || ''}));
+  const archivedUsers=allVisibleUsers.filter(x=>x.deletedAt),users=allVisibleUsers.filter(x=>!x.deletedAt);
   const sessions = rows_('Sessions');
   users.forEach(user => { const own = sessions.filter(x => x.userId === user.id).sort((a,b)=>String(b.createdAt).localeCompare(String(a.createdAt))); user.lastLoginAt = user.lastLoginAt || (own[0] ? own[0].createdAt : ''); });
   const attempts = rows_('Attempts').filter(x => ownIds.has(x.userId)).sort((a, b) => String(b.startedAt).localeCompare(String(a.startedAt)));
@@ -555,7 +556,7 @@ function teacherDashboard_(teacher) {
   });
   const skillScores = rows_('SkillScores').filter(x => ownIds.has(x.userId));
   const taskAttempts = rows_('TaskAttempts').filter(x => ownIds.has(x.userId));
-  return { users, attempts, skillScores, taskAttempts, finalDiagnosticOpen: settingBool_('finalDiagnosticOpen') };
+  return { users, archivedUsers, attempts, skillScores, taskAttempts, finalDiagnosticOpen: settingBool_('finalDiagnosticOpen') };
 }
 function myData_(user) {
   const attempts = rows_('Attempts').filter(x => x.userId === user.id).sort((a, b) => String(b.startedAt).localeCompare(String(a.startedAt)));
