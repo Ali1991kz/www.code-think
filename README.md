@@ -1,4 +1,4 @@
-# CODE THINK 11.6.0
+# CODE THINK 11.7.0
 
 Static Python learning platform: 31 tasks, grades 7–8 (19/12), Kazakh and Russian.
 GitHub Pages hosts the site. Firebase Auth and Firestore store accounts/progress.
@@ -74,3 +74,10 @@ Private teacher profile, accurate pending queue (including corrections), side-by
 Archived pupils can be permanently purged from the platform after explicit DELETE confirmation. An irreversible non-personal marker immediately revokes access, blocks resurrection and supports resumable batched cleanup of owned learning/profile/credential/identity/route/handoff documents. Firebase Authentication records are retained; the UI and UPDATE_11_6_KK.txt explain separate Console cleanup. No production pupil purge is executed by deployment.
 
 Public institutional name and author contacts were supplied by the author. QR is a locally generated SVG with the public site URL. Deploy this release Rules together with SITE files.
+
+
+## 11.7 interactive practice and active time
+
+All 31 task scenes consume actual interpreter frames, share the existing playback controls and preserve the existing flowchart. Separate grade-scoped Python practice uses the real Python worker and browser-local drafts, without assessed submissions or XP. No reference code is added to public files. The educational tracer retains its existing supported Python subset.
+
+TaskTimes records approximate active task/correction seconds separately. Focus, visibility, a 90-second idle threshold and suspended-clock bounds pause counting. Bounded idempotent pulses, server elapsed-time checks and a browser tab lease limit duplicate counting. This is descriptive self-reported activity, not a grade or productivity metric. Unmeasured old work shows no fabricated duration; abrupt browser/session loss can lose unsent time. TaskTimes is tenant/pupil scoped, included in missing-only backups and pupil purge. Deploy matching Rules before SITE files. Spark remains supported. See UPDATE_11_7_KK.txt.

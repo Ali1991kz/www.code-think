@@ -179,6 +179,37 @@ service cloud.firestore {
    allow read: if active(s) && table in ['ClassStudents','Attempts','Answers','DiagnosticProfiles','MethodProgress','TaskAttempts','TaskSteps','SkillScores','Events','Corrections','LearningEvidence','TransferProbes'] && resource.data.__ownerId == uid();
   }
   match /schools/{s}/TaskChecks/{id} {allow read: if student(s) && baseline(s);}
+  // Self-reported active time is bounded by elapsed server time; no grading fields.
+  match /schools/{s}/TaskTimes/{id} {
+   function valid(){
+    let d=request.resource.data;
+    let a=taskRun(s,d.attemptId);
+    return mine(s,d) && d.userId == uid() && d.id == id && id == d.attemptId + '__' + d.phase
+     && d.phase in ['task','correction'] && a.userId == uid()
+     && ((d.phase == 'task' && a.status == 'in_progress') || (d.phase == 'correction' && a.status == 'graded' && a.correctionsOpen == true))
+     && d.totalSeconds is int && d.totalSeconds >= 0 && d.pulseIds is list && d.pulseIds.size() >= 1 && d.pulseIds.size() <= 20
+     && d.keys().hasOnly(['id','attemptId','userId','__ownerId','phase','totalSeconds','pulseIds','__createdAt','__updatedAt']) && meta();
+   }
+   allow get: if owner(s) || (student(s) && id.matches(uid() + '_.*__(task|correction)'));
+   allow list: if owner(s) || (student(s) && resource.data.__ownerId == uid());
+   allow create: if valid() && created() && request.resource.data.totalSeconds <= 3600
+    && request.time >= taskRun(s,request.resource.data.attemptId).__createdAt + duration.value(request.resource.data.totalSeconds,'s');
+   allow update: if valid() && immutableOwner() && request.resource.data.__createdAt == resource.data.__createdAt
+    && changedOnly(['totalSeconds','pulseIds','__updatedAt'])
+    && request.resource.data.totalSeconds >= resource.data.totalSeconds
+    && request.resource.data.totalSeconds - resource.data.totalSeconds <= 3600
+    && request.time >= resource.data.__updatedAt + duration.value(request.resource.data.totalSeconds - resource.data.totalSeconds,'s');
+   // Missing-only teacher backup restore; no change to an existing timing record.
+   allow create: if owner(s) && request.resource.data.userId == request.resource.data.__ownerId
+    && request.resource.data.id == id && id == request.resource.data.attemptId + '__' + request.resource.data.phase
+    && request.resource.data.phase in ['task','correction'] && request.resource.data.totalSeconds is int && request.resource.data.totalSeconds >= 0
+    && request.resource.data.pulseIds is list && request.resource.data.pulseIds.size() <= 20
+    && get(/databases/$(database)/documents/schools/$(s)/Users/$(request.resource.data.userId)).data.role == 'student'
+    && !exists(/databases/$(database)/documents/schools/$(s)/DeletedPupils/$(request.resource.data.userId))
+    && request.resource.data.keys().hasOnly(['id','attemptId','userId','__ownerId','phase','totalSeconds','pulseIds','__createdAt','__updatedAt']) && created();
+   allow delete: if owner(s) && existsAfter(/databases/$(database)/documents/schools/$(s)/DeletedPupils/$(resource.data.userId));
+  }
+
   // TeacherSolutions has no pupil read rule. Solutions are uploaded separately.
   match /schools/{s}/Attempts/{id} {
    allow create: if mine(s,request.resource.data) && request.resource.data.userId == uid()

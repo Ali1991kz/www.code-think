@@ -180,6 +180,24 @@
   }catch(e){throw e;}
  }
 
+ // Bounded, idempotent active-time pulses. Never used to award grades or XP.
+ async function timingWorkspace(){
+  const filters=profile.role==='teacher'?[]:[['__ownerId',profile.id]];
+  return (await queryDocuments('TaskTimes',filters)).map(decode);
+ }
+ async function recordTaskTime(p){
+  requirePupil();const attemptId=String(p.attemptId||''),phase=String(p.phase||''),pulseId=String(p.pulseId||''),seconds=Number(p.seconds);
+  if(!attemptId||attemptId.includes('/')||!['task','correction'].includes(phase)||!Number.isInteger(seconds)||seconds<0||seconds>3600||!/^[a-f0-9-]{16,64}$/.test(pulseId))throw Error('Уақыт дерегі қате. / Неверные данные времени.');
+  const atDoc=await getDoc(path('TaskAttempts',attemptId)),at=atDoc&&decode(atDoc);
+  if(!at||at.userId!==profile.id)throw Error('Жұмыс қолжетімсіз. / Работа недоступна.');
+  const name=path('TaskTimes',attemptId+'__'+phase),old=await getDoc(name),before=old&&decode(old);
+  if(before?.pulseIds?.includes(pulseId))return before;
+  if(phase==='task'&&at.status!=='in_progress'||phase==='correction'&&(at.status!=='graded'||at.correctionsOpen!==true))throw Error('Уақыт есептеу осы жұмыс үшін тоқтаған. / Учёт времени для этой работы остановлен.');
+  const last=before?.__updatedAt||at.__createdAt,elapsed=Math.max(0,Math.floor((Date.now()-Date.parse(last))/1000));
+  const delta=Math.min(seconds,Number.isFinite(elapsed)?elapsed:0),obj={id:attemptId+'__'+phase,attemptId,userId:profile.id,__ownerId:profile.id,phase,totalSeconds:(before?.totalSeconds||0)+delta,pulseIds:[...(before?.pulseIds||[]),pulseId].slice(-20)};
+  await commit([documentWrite(name,obj,old)]);return {...obj,__updatedAt:new Date().toISOString()};
+ }
+
  async function requireVault(){if(!await vault.restore(profile))throw Error('Алдымен мұғалім паролімен уақытша парольдер қорын ашыңыз. / Сначала откройте хранилище временных паролей паролем учителя.');}
  async function receiptWrite(record){const name=path('RegistrationJobs','credential_'+record.userId),old=await getDoc(name);return documentWrite(name,await vault.seal(record),old);}
  async function temporaryPasswords(knownUsers){
@@ -310,7 +328,7 @@
   const [ss,ee,cc]=await Promise.all([queryDocuments('TaskSteps',[['attemptId',id]]),queryDocuments('LearningEvidence',[['attemptId',id]]),queryDocuments('Corrections',[['sourceId',id]])]);
   return {attempt:at,assignment:a,task:td?decode(td):{},student:window.CT_CORE.create({},profile).publicUser(decode(ud)),steps:ss.map(decode),evidence:ee.map(decode),corrections:cc.map(decode).filter(c=>c.userId===at.userId&&c.kind==='task')};
  }
- const purgeTables=['ClassStudents','Attempts','Answers','DiagnosticProfiles','MethodProgress','TaskAttempts','TaskSteps','SkillScores','Events','Corrections','LearningEvidence','TransferProbes','StudentProfiles','RegistrationJobs'];
+ const purgeTables=['ClassStudents','Attempts','Answers','DiagnosticProfiles','MethodProgress','TaskAttempts','TaskSteps','SkillScores','Events','Corrections','LearningEvidence','TransferProbes','StudentProfiles','RegistrationJobs','TaskTimes'];
  async function purgeDocuments(userId){
   const groups=await Promise.all(purgeTables.map(async table=>({table,docs:await queryDocuments(table,[[['Answers','TaskSteps','LearningEvidence'].includes(table)?'__ownerId':'userId',userId]])})));
   for(const table of ['identities','loginRoutes','LoginHandoffs'])groups.push({table,docs:await queryDocuments(table,[['schoolId',identity.schoolId],['userId',userId]],true)});
@@ -431,9 +449,9 @@
   const core=window.CT_CORE.create(state.tables,profile);
   const result=teacher?{dashboard:core.run('teacherDashboard'),teacherWS:core.run('teacherWorkspace'),corrections:core.run('correctionWorkspace')}:{mine:core.run('me'),workspace:core.run('studentWorkspace'),corrections:core.run('correctionWorkspace')};
   result.ped=(names.includes('LearningEvidence')||names.includes('TransferProbes'))?core.run('pedagogyWorkspace'):{evidence:[],probes:[],reviews:[]};
-  await commit(writesFor(state,core));if(!teacher)result.studentProfile=await studentProfile();else result.teacherProfile=await teacherProfile();if(teacher&&view==='students'){result.temporaryPasswords=await temporaryPasswords(state.tables.Users);result.purgeJobs=(await queryDocuments('PurgeJobs',[['status','deleting']])).map(decode);}return result;
+  await commit(writesFor(state,core));if(!teacher)result.studentProfile=await studentProfile();else result.teacherProfile=await teacherProfile();if(teacher&&view==='students'){result.temporaryPasswords=await temporaryPasswords(state.tables.Users);result.purgeJobs=(await queryDocuments('PurgeJobs',[['status','deleting']])).map(decode);}result.timings=await timingWorkspace();return result;
  }
- const backupTables=[...Object.keys(window.CT_CORE.schemas).filter(n=>n!=='Sessions'),'TeacherSolutions','TaskChecks'];
+ const backupTables=[...Object.keys(window.CT_CORE.schemas).filter(n=>n!=='Sessions'),'TeacherSolutions','TaskChecks','TaskTimes'];
  async function exportBackup(){
   if(profile.role!=='teacher')throw Error('Мұғалім құқығы қажет. / Нужны права учителя.');
   const state=await load(backupTables,{optimistic:true}),tables={};
@@ -461,7 +479,7 @@
     if(item.backupOwner&&!users.has(item.backupOwner)){skipped++;continue;}
     const raw=Object.fromEntries(Object.entries(item).filter(([k])=>!k.startsWith('backup')&&!k.startsWith('__')&&!['password','temporaryPassword','passwordHash','passwordSalt','accessCodeHash','teacherAccessCode'].includes(k)));
     if(item.backupOwner)raw.__ownerId=item.backupOwner;
-    const obj=['TeacherSolutions','TaskChecks'].includes(table)?raw:clean(table,raw,state.tables);
+    const obj=['TeacherSolutions','TaskChecks','TaskTimes'].includes(table)?raw:clean(table,raw,state.tables);
     const write=documentWrite(name,obj,null);
     if(item.backupSubmittedAt){if(!Number.isFinite(Date.parse(item.backupSubmittedAt)))throw Error('Уақыт мәні қате. / Неверная дата.');write.update.fields.__submittedAt={timestampValue:item.backupSubmittedAt};}
     writes.push(write);
@@ -478,7 +496,7 @@
 
  async function dispatch(action,p={}){
   if(!project||!key)throw Error('Firebase config.js баптауларын толтырыңыз. / Заполните Firebase config.js.');
-  if(action==='ping')return {version:'11.6.0',backend:'firebase-direct',plan:'Spark',customStudentLogins:true};
+  if(action==='ping')return {version:'11.7.0',backend:'firebase-direct',plan:'Spark',customStudentLogins:true};
   if(action==='logout'){clear();return {loggedOut:true};}
   if(action==='setupTeacher'){const r=await setupTeacher(p);if(!r.needsApproval&&profile?.role==='teacher')await vault.unlock(profile,String(p.password));return r;}
   if(action==='login'){
@@ -501,6 +519,8 @@
   if(action==='bulkManageStudents')return bulk(p);
   if(action==='teacherProfile')return teacherProfile();
   if(action==='saveTeacherProfile')return saveTeacherProfile(p);
+  if(action==='timingWorkspace')return timingWorkspace();
+  if(action==='recordTaskTime')return recordTaskTime(p);
   if(action==='teacherReviewWorkspace')return teacherReviewWorkspace(p);
   if(action==='previewPurgeStudents')return previewPurgeStudents(p);
   if(action==='purgeStudents')return purgeStudents(p);
@@ -517,5 +537,5 @@
   }
   return learning(action,p);
  }
- window.CT_FIREBASE={call(action,p={}){const task=queue.then(()=>dispatch(action,p));queue=task.catch(()=>{});return task.catch(e=>{throw friendly(e);});},invalidate:()=>readCache.clear(),status:()=>({signedIn:!!session,project,version:'11.6.0',customStudentLogins:true}),_test:local?{val,plain,rowKey,decode,root}:undefined};
+ window.CT_FIREBASE={call(action,p={}){const task=queue.then(()=>dispatch(action,p));queue=task.catch(()=>{});return task.catch(e=>{throw friendly(e);});},invalidate:()=>readCache.clear(),status:()=>({signedIn:!!session,project,version:'11.7.0',customStudentLogins:true}),_test:local?{val,plain,rowKey,decode,root}:undefined};
 })();
