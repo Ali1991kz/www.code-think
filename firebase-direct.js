@@ -198,6 +198,21 @@
   await commit([documentWrite(name,obj,old)]);return {...obj,__updatedAt:new Date().toISOString()};
  }
 
+ // Store actual first/latest selections; never assign a teacher score here.
+ async function saveConclusionQuiz(p){
+  requirePupil();const id=String(p.attemptId||'');if(!id||id.includes('/'))throw Error('Жұмыс кілті қате. / Неверный ключ работы.');
+  const atDoc=await getDoc(path('TaskAttempts',id)),at=atDoc&&decode(atDoc);
+  if(!at||at.userId!==profile.id||at.status!=='in_progress')throw Error('Жұмыс қолжетімсіз. / Работа недоступна.');
+  const stageDocs=await queryDocuments('TaskSteps',[['__ownerId',profile.id],['attemptId',id]]),tested=stageDocs.find(d=>decode(d).stepCode==='TH');if(!tested||!String(decode(tested).response||'').trim())throw Error('Алдымен кодты орындап, тексеруді сақта. / Сначала выполни код и сохрани проверку.');
+  const assignment=await getDoc(path('Assignments',at.assignmentId)),task=assignment&&await getDoc(path('Tasks',decode(assignment).taskId));if(!task)throw Error('Есеп табылмады. / Задача не найдена.');
+  const evidenceDocs=await queryDocuments('LearningEvidence',[['__ownerId',profile.id],['attemptId',id]]);
+  const taskData=decode(task),sourceKey=taskData.sourceKey||window.CT_CONTENT.tasks.find(x=>x.kk.title===taskData.title)?.sourceKey,eName=path('LearningEvidence',id+':INK'),old=evidenceDocs.find(d=>d.name===eName),sName=path('TaskSteps',id+'__INK__5'),stepDoc=stageDocs.find(d=>d.name===sName);let details={};try{details=JSON.parse(old?decode(old).detailsJson:'{}');}catch{}
+  const engine=window.CT_CONCLUSION,quiz=engine.answer(sourceKey,details.quiz,p.question,p.choice);
+  const fields=engine.fields(sourceKey,quiz),obj={id:id+':INK',userId:profile.id,__ownerId:profile.id,attemptId:id,kind:'stage',step:'INK',detailsJson:JSON.stringify({...details,legacyFields:details.legacyFields||(!details.quiz&&details.fields?.some(Boolean)?details.fields:undefined),legacyResponse:details.legacyResponse||(!details.quiz&&stepDoc?decode(stepDoc).response:undefined),fields,quiz,sourceKey,flowVersion:4}),updatedAt:new Date().toISOString()};
+  const writes=[documentWrite(eName,obj,old)];if(engine.results(sourceKey,quiz).complete)writes.push(documentWrite(sName,{attemptId:id,stepCode:'INK',modelVersion:5,response:fields.join('\n\n'),score:'',feedback:'',updatedAt:new Date().toISOString(),__ownerId:profile.id},stepDoc));
+  await commit(writes);return {evidence:obj,quiz,results:engine.results(sourceKey,quiz)};
+ }
+
  async function requireVault(){if(!await vault.restore(profile))throw Error('Алдымен мұғалім паролімен уақытша парольдер қорын ашыңыз. / Сначала откройте хранилище временных паролей паролем учителя.');}
  async function receiptWrite(record){const name=path('RegistrationJobs','credential_'+record.userId),old=await getDoc(name);return documentWrite(name,await vault.seal(record),old);}
  async function temporaryPasswords(knownUsers){
@@ -496,7 +511,7 @@
 
  async function dispatch(action,p={}){
   if(!project||!key)throw Error('Firebase config.js баптауларын толтырыңыз. / Заполните Firebase config.js.');
-  if(action==='ping')return {version:'11.7.0',backend:'firebase-direct',plan:'Spark',customStudentLogins:true};
+  if(action==='ping')return {version:'11.8.0',backend:'firebase-direct',plan:'Spark',customStudentLogins:true};
   if(action==='logout'){clear();return {loggedOut:true};}
   if(action==='setupTeacher'){const r=await setupTeacher(p);if(!r.needsApproval&&profile?.role==='teacher')await vault.unlock(profile,String(p.password));return r;}
   if(action==='login'){
@@ -520,6 +535,7 @@
   if(action==='teacherProfile')return teacherProfile();
   if(action==='saveTeacherProfile')return saveTeacherProfile(p);
   if(action==='timingWorkspace')return timingWorkspace();
+  if(action==='saveConclusionQuiz')return saveConclusionQuiz(p);
   if(action==='recordTaskTime')return recordTaskTime(p);
   if(action==='teacherReviewWorkspace')return teacherReviewWorkspace(p);
   if(action==='previewPurgeStudents')return previewPurgeStudents(p);
@@ -537,5 +553,5 @@
   }
   return learning(action,p);
  }
- window.CT_FIREBASE={call(action,p={}){const task=queue.then(()=>dispatch(action,p));queue=task.catch(()=>{});return task.catch(e=>{throw friendly(e);});},invalidate:()=>readCache.clear(),status:()=>({signedIn:!!session,project,version:'11.7.0',customStudentLogins:true}),_test:local?{val,plain,rowKey,decode,root}:undefined};
+ window.CT_FIREBASE={call(action,p={}){const task=queue.then(()=>dispatch(action,p));queue=task.catch(()=>{});return task.catch(e=>{throw friendly(e);});},invalidate:()=>readCache.clear(),status:()=>({signedIn:!!session,project,version:'11.8.0',customStudentLogins:true}),_test:local?{val,plain,rowKey,decode,root}:undefined};
 })();
