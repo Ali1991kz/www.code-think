@@ -582,6 +582,30 @@
     };
   }
  
- 
- window.CT_FIREBASE={call(action,p={}){const task=queue.then(()=>dispatch(action,p));queue=task.catch(()=>{});return task.catch(e=>{throw friendly(e);});},invalidate:()=>readCache.clear(),status:()=>({signedIn:!!session,project,version:'11.8.0',customStudentLogins:true}),_test:local?{val,plain,rowKey,decode,root}:undefined};
+
+window.CT_FIREBASE = {
+  call(action, p = {}) {
+    const task = queue.then(() => dispatch(action, p));
+    queue = task.catch(() => {});
+    return task.catch(e => {
+      throw friendly(e);
+    });
+  },
+
+  invalidate: () => readCache.clear(),
+
+  status: () => ({
+    signedIn: !!session,
+    project,
+    version: '11.8.0',
+    customStudentLogins: true
+  }),
+
+  testNotificationConnection,
+
+  _test: local
+    ? { val, plain, rowKey, decode, root }
+    : undefined
+};
 })();
+
