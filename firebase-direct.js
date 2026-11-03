@@ -553,5 +553,35 @@
   }
   return learning(action,p);
  }
+
+  // CODE THINK - Firebase connection test
+  async function testNotificationConnection() {
+    const idToken = await token();
+
+    const response = await fetch(
+      "https://code-think-notify-test.ali-araltay99.workers.dev/verify",
+      {
+        method: "POST",
+        headers: {
+          "Authorization": "Bearer " + idToken
+        }
+      }
+    );
+
+    if (!response.ok) {
+      return {
+        verified: false,
+        status: response.status
+      };
+    }
+
+    const result = await response.json();
+
+    return {
+      verified: result.verified === true
+    };
+  }
+ 
+ 
  window.CT_FIREBASE={call(action,p={}){const task=queue.then(()=>dispatch(action,p));queue=task.catch(()=>{});return task.catch(e=>{throw friendly(e);});},invalidate:()=>readCache.clear(),status:()=>({signedIn:!!session,project,version:'11.8.0',customStudentLogins:true}),_test:local?{val,plain,rowKey,decode,root}:undefined};
 })();
