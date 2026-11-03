@@ -559,7 +559,7 @@
     const idToken = await token();
 
     const response = await fetch(
-      "https://code-think-notify-test.ali-araltay99.workers.dev/verify",
+      "https://code-think-notify-test.ali-araltay99.workers.dev/notify",
       {
         method: "POST",
         headers: {
@@ -578,7 +578,7 @@
     const result = await response.json();
 
     return {
-      verified: result.verified === true
+      verified: result.success === true
     };
   }
  
