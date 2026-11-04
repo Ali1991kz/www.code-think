@@ -736,6 +736,23 @@
   const renderBeforeOlympiad=render;
   render=function(){window.CT_OLYMPIAD.context(olympiadContext());if(!(page==='olympiad'||(user?.role==='teacher'&&teacherTab==='olympiad')))window.CT_OLYMPIAD.leave();renderBeforeOlympiad();};
 
+  // 12.0.1: the first baseline begins only after reading the general introduction.
+  const openDiagnosticBeforeIntro=openDiagnostic;
+  openDiagnostic=async function(type){
+    if(type==='baseline'&&user?.role==='student'&&!baseline()){page='diagnostic-intro';return;}
+    return openDiagnosticBeforeIntro(type);
+  };
+  const studentBeforeDiagnosticIntro=studentView;
+  studentView=function(){
+    if(user?.role==='student'&&!baseline()&&['home','diagnostic-intro'].includes(page))return nav()+window.CT_DIAGNOSTIC_INTRO.view(lang);
+    return studentBeforeDiagnosticIntro();
+  };
+  actions['diagnostic-intro-start']=async()=>{
+    if(user?.role!=='student'||user.mustChangePassword)return;
+    await openDiagnosticBeforeIntro('baseline');
+  };
+
   boot();
 })();
+
 
