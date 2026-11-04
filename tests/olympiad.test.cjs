@@ -52,3 +52,34 @@ test('navigation replaces the pedagogy tab and loads olympiad UI for both roles'
  for(const file of ['olympiad-bank.js','olympiad-model.js','olympiad.js','olympiad.css'])assert.ok(index.includes(file));
  assert.ok(index.indexOf('olympiad-model.js')<index.indexOf('firebase-direct.js'));assert.ok(index.indexOf('olympiad.js')<index.indexOf('platform.js'));
 });
+
+test('result labels never invent a test count and preserve only a coherent result for identical code',()=>{
+ const m=models().CT_OLYMPIAD_MODEL;
+ assert.equal(m.workState(undefined),'untested');
+ assert.equal(m.workState({verdict:'draft',passed:0,total:0,submissions:0}),'untested');
+ assert.equal(m.workState({verdict:'draft',passed:0,total:0,submissions:11,solved:true}),'recheck');
+ assert.equal(m.workState({verdict:'accepted',passed:0,total:11}),'untested');
+ const prior={code:'print(3)',verdict:'accepted',passed:11,total:11,submissions:1,solved:true};
+ assert.deepEqual(JSON.parse(JSON.stringify(m.resultForSave(prior,{code:'print(3)',inputData:'new'},11))),{verdict:'accepted',passed:11,total:11});
+ assert.equal(m.resultForSave(prior,{code:'print(0)'},11).verdict,'draft');
+ assert.equal(m.resultForSave(prior,{code:'print(3)'},12).verdict,'draft');
+});
+test('legacy teacher rows hide 0/0; one-click recheck saves the exact pupil code and edited teacher previews stay separate',async()=>{
+ const w=models(),events={},storage=new Map(),calls=[];let html='',lastWorker;
+ const rootNode={set outerHTML(v){html=v;},querySelector(){return null;},querySelectorAll(){return [];}};
+ const doc={addEventListener:(n,f)=>events[n]=f,querySelector:s=>s==='#olympiadRoot'?rootNode:null};
+ class FakeWorker{constructor(){lastWorker=this;}postMessage(v){this.request=v;}terminate(){}}
+ const c=vm.createContext({window:w,document:doc,localStorage:{getItem:k=>storage.get(k),setItem:(k,v)=>storage.set(k,v),removeItem:k=>storage.delete(k)},setTimeout,clearTimeout,Worker:FakeWorker,console});vm.runInContext(read('olympiad.js'),c);
+ const old={id:'s__olymp-01',userId:'s',taskId:'olymp-01',code:'print(3)',inputData:'abc\\nbcd',lastOutput:'3',verdict:'draft',passed:0,total:0,submissions:1,solved:true,__updatedAt:'old'};
+ const other={...old,id:'other__olymp-01',userId:'other',code:'print(0)'};
+ const data={allowed:true,users:[{id:'s',name:'Pupil',className:'8A',completed:12,total:12}],access:[],work:[old,other]};
+ const api=async(action,p)=>{calls.push({action,p});if(action==='olympiadWorkspace')return data;if(action==='reviewOlympiadWork')return {...old,verdict:p.verdict,passed:p.passed,total:11,__updatedAt:'new'};throw Error(action);};
+ await w.CT_OLYMPIAD.load({user:{id:'t',role:'teacher'},lang:'kk',api});
+ assert.ok(!w.CT_OLYMPIAD.html().includes('0/0'));assert.ok(w.CT_OLYMPIAD.html().includes('Қайта тексеру қажет'));
+ const click=(action,extra={})=>events.click({target:{closest:()=>({disabled:false,dataset:{olymp:action,...extra}})}});
+ await click('review',{work:old.id});assert.equal(lastWorker.request.code,old.code);assert.ok(html.includes('Оқушының сақталған коды'));
+ async function finish(){const tests=w.CT_OLYMPIAD_BANK[0].tests;for(let index=0;index<tests.length;index++){lastWorker.onmessage({data:{type:'case-start',index}});lastWorker.onmessage({data:{type:'case-result',index,ok:true,output:tests[index].output}});}lastWorker.onmessage({data:{type:'complete'}});await new Promise(r=>setTimeout(r,0));}
+ await finish();assert.equal(calls.filter(x=>x.action==='reviewOlympiadWork').length,1);assert.equal(data.work.find(x=>x.userId==='s').passed,11);assert.equal(data.work.find(x=>x.userId==='other').code,'print(0)');
+ events.input({target:{closest:()=>({dataset:{olympField:'code'},value:'print(99)'})}});await click('check');await finish();assert.equal(calls.filter(x=>x.action==='reviewOlympiadWork').length,1);assert.equal(data.work.find(x=>x.userId==='s').code,'print(3)');
+ await click('back');assert.ok(w.CT_OLYMPIAD.html().includes('11/11'));assert.ok(!w.CT_OLYMPIAD.html().includes('0/0'));
+});

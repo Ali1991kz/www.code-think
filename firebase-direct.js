@@ -256,10 +256,26 @@
   const code=String(p.code||''),inputData=String(p.inputData||''),lastOutput=String(p.lastOutput||'');
   if(code.length>20000||inputData.length>200000||lastOutput.length>12000)throw Error('Код немесе кіріс тым ұзын. / Код или ввод слишком длинный.');
   const id=profile.id+'__'+task.id,name=path('OlympiadWork',id),old=await getDoc(name),prior=old?decode(old):{};
-  const submitted=p.submit===true,total=submitted?task.tests.length:0,passed=submitted?Number(p.passed):0;
-  const verdict=submitted?String(p.verdict):'draft';
-  if(submitted&&(!code.trim()||!Number.isInteger(passed)||passed<0||passed>total||!['accepted','wrong','error','timeout','stopped'].includes(verdict)||(verdict==='accepted'&&passed!==total)))throw Error('Тексеру нәтижесі жарамсыз. / Некорректный результат проверки.');
+  const submitted=p.submit===true,{total,passed,verdict}=window.CT_OLYMPIAD_MODEL.resultForSave(prior,{...p,code},task.tests.length);
   const obj={id,userId:profile.id,__ownerId:profile.id,taskId:task.id,code,inputData,lastOutput,verdict,passed,total,submissions:(Number(prior.submissions)||0)+(submitted?1:0),solved:prior.solved===true||verdict==='accepted',selfReported:true};
+  await commit([documentWrite(name,obj,old)]);return decode(await getDoc(name));
+ }
+
+
+ // Teacher rechecks only the saved pupil code. No grade, XP or code edit.
+ async function reviewOlympiadWork(p){
+  requireTeacher();
+  const id=String(p.workId||'');
+  if(!/^[A-Za-z0-9_-]+__olymp-(0[1-9]|1[0-5])$/.test(id))throw Error('Жұмыс табылмады. / Работа не найдена.');
+  const name=path('OlympiadWork',id),old=await getDoc(name),prior=old&&decode(old),task=prior&&olympiadTask(prior.taskId);
+  if(!prior||!task||prior.id!==id||id!==prior.userId+'__'+prior.taskId)throw Error('Жұмыс табылмады. / Работа не найдена.');
+  const pupil=await getDoc(path('Users',prior.userId)),u=pupil&&decode(pupil);
+  if(!u||u.role!=='student'||String(u.active)!=='true'||u.deletedAt)throw Error('Оқушы қолжетімсіз. / Ученик недоступен.');
+  if(!p.expectedUpdatedAt||p.expectedUpdatedAt!==prior.__updatedAt||String(p.code)!==prior.code)
+   throw Error('Оқушы жұмысы өзгерді. Тізімді жаңартып, қайта тексеріңіз. / Работа ученика изменилась. Обновите список и проверьте снова.');
+  const result=window.CT_OLYMPIAD_MODEL.resultForSave(prior,{submit:true,code:prior.code,passed:p.passed,verdict:p.verdict},task.tests.length);
+  const fields=['id','userId','__ownerId','taskId','code','inputData','lastOutput','submissions'];
+  const obj={...Object.fromEntries(fields.map(k=>[k,prior[k]])),...result,solved:prior.solved===true||result.verdict==='accepted',selfReported:true};
   await commit([documentWrite(name,obj,old)]);return decode(await getDoc(name));
  }
 
@@ -676,7 +692,7 @@
 
  async function dispatch(action,p={}){
   if(!project||!key)throw Error('Firebase config.js баптауларын толтырыңыз. / Заполните Firebase config.js.');
-  if(action==='ping')return {version:'12.2.0',backend:'firebase-direct',plan:'Spark',customStudentLogins:true};
+  if(action==='ping')return {version:'12.2.1',backend:'firebase-direct',plan:'Spark',customStudentLogins:true};
   if(action==='logout'){clear();return {loggedOut:true};}
   if(action==='setupTeacher'){const r=await setupTeacher(p);if(!r.needsApproval&&profile?.role==='teacher')await vault.unlock(profile,String(p.password));return r;}
   if(action==='login'){
@@ -707,6 +723,7 @@
   if(action==='saveDebugLabWork')return saveDebugLabWork(p);
   if(action==='setOlympiadAccess')return setOlympiadAccess(p);
   if(action==='saveOlympiadWork')return saveOlympiadWork(p);
+  if(action==='reviewOlympiadWork')return reviewOlympiadWork(p);
   if(action==='saveConclusionQuiz')return saveConclusionQuiz(p);
   if(action==='recordTaskTime')return recordTaskTime(p);
   if(action==='teacherReviewWorkspace')return teacherReviewWorkspace(p);
@@ -725,7 +742,7 @@
   }
   return learning(action,p);
  }
- window.CT_FIREBASE={call(action,p={}){const task=queue.then(()=>dispatch(action,p));queue=task.catch(()=>{});return task.catch(e=>{throw friendly(e);});},invalidate:()=>readCache.clear(),status:()=>({signedIn:!!session,project,version:'12.2.0',customStudentLogins:true}),_test:local?{val,plain,rowKey,decode,root}:undefined};
+ window.CT_FIREBASE={call(action,p={}){const task=queue.then(()=>dispatch(action,p));queue=task.catch(()=>{});return task.catch(e=>{throw friendly(e);});},invalidate:()=>readCache.clear(),status:()=>({signedIn:!!session,project,version:'12.2.1',customStudentLogins:true}),_test:local?{val,plain,rowKey,decode,root}:undefined};
 })();
 
 

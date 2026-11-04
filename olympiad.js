@@ -2,12 +2,30 @@
  'use strict';
  const bank=window.CT_OLYMPIAD_BANK,model=window.CT_OLYMPIAD_MODEL;
  const esc=v=>String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
- let ctx={},data=null,error='',selected='',level=0,busy=false,status='',statusKind='',worker=null,timer=null,epoch=0,drafts=new Map(),job=0,actionBusy=false;
+ let ctx={},data=null,error='',selected='',level=0,busy=false,status='',statusKind='',worker=null,timer=null,epoch=0,drafts=new Map(),job=0,actionBusy=false,review=null;
  const t=(kk,ru)=>ctx.lang==='ru'?ru:kk;
  const task=()=>bank.find(x=>x.id===selected),isTeacher=()=>ctx.user?.role==='teacher';
  const label=v=>({draft:t('Жоба','Черновик'),accepted:t('Тестілерден өтті','Тесты пройдены'),wrong:t('Қате жауап','Неверный ответ'),error:t('Орындау қатесі','Ошибка исполнения'),timeout:t('Уақыт шегі','Лимит времени'),stopped:t('Тоқтатылды','Остановлено')})[v]||'—';
+ function resultSummary(w){
+  const state=model.workState(w);
+  if(state==='untested')return t('Әлі тексерілмеген','Ещё не проверено');
+  if(state==='recheck')return t('Қайта тексеру қажет','Нужна повторная проверка');
+  return label(state)+' · '+w.passed+'/'+w.total;
+ }
+ function editorSummary(){
+  const d=draft(selected),owner=isTeacher()&&review?review.userId:ctx.user.id;
+  const saved=data?.work?.find(w=>w.taskId===selected&&w.userId===owner);
+  if(saved&&saved.code!==d.code)return t('Код өзгерді, қайта тексеру қажет','Код изменён, нужна повторная проверка');
+  return resultSummary(saved);
+ }
+ function paintEditorSummary(){const el=document.querySelector('[data-olymp-result]');if(el&&selected)el.textContent=editorSummary();}
+ function codeChanged(){status=t('Код өзгерді, қайта тексеру қажет','Код изменён, нужна повторная проверка');statusKind='draft';statusPaint();}
+ function reviewNotice(){
+  if(!isTeacher()||!review)return '';
+  return '<p class="note">'+esc(review.name)+' · '+t('Оқушының сақталған коды. Осы кодты қайта тексеру нәтижесі оқушы жұмысына сақталады. Кодты өзгертсеңіз, нәтиже тек мұғалімнің сынағы болады.','Сохранённый код ученика. Повторная проверка этого кода сохраняется в работе ученика. Если изменить код, результат останется пробой учителя.')+'</p>';
+ }
  const key=id=>'ct-olympiad:'+window.CODE_THINK_CONFIG?.firebase?.projectId+':'+ctx.user?.id+':'+id;
- function context(next){if(ctx.user?.id!==next.user?.id){leave();data=null;selected='';drafts=new Map();error='';}ctx=next;}
+ function context(next){if(ctx.user?.id!==next.user?.id){leave();data=null;selected='';drafts=new Map();error='';review=null;}ctx=next;}
  function draft(id){
   if(drafts.has(id))return drafts.get(id);
   const old=data?.work?.find(w=>w.taskId===id&&w.userId===ctx.user.id)||{};
@@ -18,9 +36,9 @@
  function persist(id){try{localStorage.setItem(key(id),JSON.stringify({...draft(id),savedAt:Date.now()}));}catch{}}
  function button(id,text,extra='',cls=''){return `<button type="button" data-olymp="${id}" ${extra} class="${cls}" ${busy||actionBusy?'disabled':''}>${text}</button>`;}
  function repaint(){const root=document.querySelector('#olympiadRoot');if(root)root.outerHTML=html();}
- function statusPaint(){const root=document.querySelector('#olympiadRoot');if(!root)return;const el=root.querySelector('[data-olymp-status]');if(el){el.textContent=status;el.dataset.state=statusKind;}root.querySelectorAll('[data-olymp],textarea').forEach(el=>el.disabled=busy||actionBusy);const stop=root.querySelector('[data-olymp=stop]');if(stop)stop.disabled=!busy;}
+ function statusPaint(){const root=document.querySelector('#olympiadRoot');if(!root)return;const el=root.querySelector('[data-olymp-status]');if(el){el.textContent=status;el.dataset.state=statusKind;}root.querySelectorAll('[data-olymp],textarea').forEach(el=>el.disabled=busy||actionBusy);const stop=root.querySelector('[data-olymp=stop]');if(stop)stop.disabled=!busy;paintEditorSummary();}
  async function load(next){
-  context(next);const version=epoch;error='';
+  context(next);const version=epoch;error='';review=null;
   try{const fresh=await ctx.api('olympiadWorkspace');if(version===epoch)data=fresh;}
   catch(e){if(version===epoch){data=null;error=e.message;}}
  }
@@ -36,22 +54,29 @@
  }
  function catalog(){
   const solved=new Set((data.work||[]).filter(w=>w.userId===ctx.user.id&&w.solved).map(w=>w.taskId));
-  return `<article class="card olymp-intro"><div class="olymp-progress"><strong>${isTeacher()?'15':solved.size+'/15'}</strong><span>${t('есеп · жолдар, нұсқалар және қозғалыс','задач · строки, версии и движение')}</span></div><p>${t('Есепті оқы, Python кодын жаз, өз кірісіңмен орында және қосымша тестілермен тексер.','Прочитай условие, напиши Python-код, запусти на своём вводе и проверь дополнительными тестами.')}</p><p class="compact muted">${t('Тест нәтижесі — жаттығу көрсеткіші. Мұғалімнің негізгі бағалары мен XP ұпайлары бөлек сақталады.','Результат тестов — показатель тренировки. Основные оценки учителя и XP сохраняются отдельно.')}</p></article>${isTeacher()?pupils():''}<div class="olymp-levels">${[[0,'Барлығы','Все'],[1,'1 · Бастау','1 · Старт'],[2,'2 · Дамыту','2 · Развитие'],[3,'3 · Күрделі','3 · Сложные']].map(([n,kk,ru])=>button('level',t(kk,ru),`data-level="${n}"`,level===n?'active':'')).join('')}</div><div class="olymp-grid">${bank.filter(p=>!level||p.level===level).map(p=>{const w=(data.work||[]).find(w=>w.userId===ctx.user.id&&w.taskId===p.id),m=p[ctx.lang];return `<article class="card"><span class="badge">${String(p.number).padStart(2,'0')} · ${t('Деңгей','Уровень')} ${p.level}</span><h3>${esc(m.title)}</h3><span class="olymp-topic">${esc(t(p.topic,{Жолдар:'Строки',Нұсқалар:'Версии',Қозғалыс:'Движение'}[p.topic]))}</span><span>${w?.solved?'✓ '+t('Тестілерден өткен','Тесты пройдены'):w?label(w.verdict):t('Әлі басталмаған','Ещё не начато')}</span>${button('open',t('Есепті ашу','Открыть задачу'),`data-task="${p.id}"`,'primary')}</article>`;}).join('')}</div><p class="olymp-source">${t('Жүктелген 8-сынып олимпиадасының A, B, C бағыттарына сүйенген бейімделген жаттығулар.','Адаптированные тренировочные задачи по направлениям A, B, C из загруженного комплекта 8 класса.')}</p>`;
+  return `<article class="card olymp-intro"><div class="olymp-progress"><strong>${isTeacher()?'15':solved.size+'/15'}</strong><span>${t('есеп · жолдар, нұсқалар және қозғалыс','задач · строки, версии и движение')}</span></div><p>${t('Есепті оқы, Python кодын жаз, өз кірісіңмен орында және қосымша тестілермен тексер.','Прочитай условие, напиши Python-код, запусти на своём вводе и проверь дополнительными тестами.')}</p><p class="compact muted">${t('Тест нәтижесі — жаттығу көрсеткіші. Мұғалімнің негізгі бағалары мен XP ұпайлары бөлек сақталады.','Результат тестов — показатель тренировки. Основные оценки учителя и XP сохраняются отдельно.')} ${t('Орындалған есеп саны бұрын кемінде бір рет тестіден өткен жұмыстарды санайды. Әр есепте соңғы сақталған кодтың күйі көрсетіледі.','Счётчик решённых задач учитывает работы, проходившие тесты хотя бы один раз. У каждой задачи указан статус последнего сохранённого кода.')}</p></article>${isTeacher()?pupils():''}<div class="olymp-levels">${[[0,'Барлығы','Все'],[1,'1 · Бастау','1 · Старт'],[2,'2 · Дамыту','2 · Развитие'],[3,'3 · Күрделі','3 · Сложные']].map(([n,kk,ru])=>button('level',t(kk,ru),`data-level="${n}"`,level===n?'active':'')).join('')}</div><div class="olymp-grid">${bank.filter(p=>!level||p.level===level).map(p=>{const w=(data.work||[]).find(w=>w.userId===ctx.user.id&&w.taskId===p.id),m=p[ctx.lang];return `<article class="card"><span class="badge">${String(p.number).padStart(2,'0')} · ${t('Деңгей','Уровень')} ${p.level}</span><h3>${esc(m.title)}</h3><span class="olymp-topic">${esc(t(p.topic,{Жолдар:'Строки',Нұсқалар:'Версии',Қозғалыс:'Движение'}[p.topic]))}</span><span>${w?resultSummary(w):t('Әлі басталмаған','Ещё не начато')}</span>${button('open',t('Есепті ашу','Открыть задачу'),`data-task="${p.id}"`,'primary')}</article>`;}).join('')}</div><p class="olymp-source">${t('Жүктелген 8-сынып олимпиадасының A, B, C бағыттарына сүйенген бейімделген жаттығулар.','Адаптированные тренировочные задачи по направлениям A, B, C из загруженного комплекта 8 класса.')}</p>`;
  }
  function pupils(){
-  return `<details class="card" open><summary><strong>${t('Оқушылардың дайындығы және қолжетімділік','Подготовка учеников и доступ')}</strong></summary><p class="compact muted">${t('Автоматты режим: 8-сыныптың 12 негізгі есебі бағаланғанда ашылады. Тест нәтижелері оқушы браузерінен сақталады; мұғалім кодты қарап, тексере алады.','Автоматический режим: открывается после проверки 12 основных задач 8 класса. Результаты тестов сохраняются из браузера ученика; учитель может просмотреть и проверить код.')}</p>${data.users.map(u=>{const a=data.access.find(a=>a.userId===u.id),works=data.work.filter(w=>w.userId===u.id),solved=works.filter(w=>w.solved).length;return `<div class="olymp-pupil"><div><strong>${esc(u.name)}</strong><small>${esc(u.className)} · ${u.completed}/${u.total} ${t('негізгі есеп','основных задач')}</small></div><div>${a?.allowed?'🟢 '+t('Ашық','Открыто'):'🔒 '+t('Жабық','Закрыто')}<small>${solved}/15 · ${works.reduce((n,w)=>n+w.submissions,0)} ${t('тексеруге жіберу','отправок')}</small></div><div class="olymp-actions">${button('access',a?.allowed?t('Жабу','Закрыть'):t('Ашу','Открыть'),`data-user="${u.id}" data-allow="${!a?.allowed}"`)}${a?.manual?button('auto',t('Автоматты','Автоматически'),`data-user="${u.id}"`):''}</div></div>${works.length?`<details><summary>${esc(u.name)} · ${t('Кодтары мен нәтижелері','Код и результаты')}</summary>${works.map(w=>`<details class="history"><summary>${esc(bank.find(p=>p.id===w.taskId)?.[ctx.lang]?.title)} · ${label(w.verdict)} · ${w.passed}/${w.total}</summary><pre class="code-block olymp-code-review">${esc(w.code)}</pre><p>${t('Кіріс','Ввод')}</p><pre class="code-block">${esc(w.inputData)}</pre><p>${t('Соңғы нәтиже','Последний вывод')}</p><pre class="console">${esc(w.lastOutput)}</pre></details>`).join('')}</details>`:''}`;}).join('')||t('Белсенді оқушы жоқ.','Нет активных учеников.')}</details>`;
+  return `<details class="card" open><summary><strong>${t('Оқушылардың дайындығы және қолжетімділік','Подготовка учеников и доступ')}</strong></summary><p class="compact muted">${t('Автоматты режим: 8-сыныптың 12 негізгі есебі бағаланғанда ашылады. Тест нәтижелері оқушы браузерінен сақталады; мұғалім кодты қарап, тексере алады.','Автоматический режим: открывается после проверки 12 основных задач 8 класса. Результаты тестов сохраняются из браузера ученика; учитель может просмотреть и проверить код.')}</p>${data.users.map(u=>{const a=data.access.find(a=>a.userId===u.id),works=data.work.filter(w=>w.userId===u.id),solved=works.filter(w=>w.solved).length;return `<div class="olymp-pupil"><div><strong>${esc(u.name)}</strong><small>${esc(u.className)} · ${u.completed}/${u.total} ${t('негізгі есеп','основных задач')}</small></div><div>${a?.allowed?'🟢 '+t('Ашық','Открыто'):'🔒 '+t('Жабық','Закрыто')}<small>${solved}/15 ${t('есеп бұрын тестіден өткен','задач ранее прошли тесты')} · ${works.reduce((n,w)=>n+w.submissions,0)} ${t('тексеруге жіберу','отправок')}</small></div><div class="olymp-actions">${button('access',a?.allowed?t('Жабу','Закрыть'):t('Ашу','Открыть'),`data-user="${u.id}" data-allow="${!a?.allowed}"`)}${a?.manual?button('auto',t('Автоматты','Автоматически'),`data-user="${u.id}"`):''}</div></div>${works.length?`<details><summary>${esc(u.name)} · ${t('Кодтары мен нәтижелері','Код и результаты')}</summary>${works.map(w=>`<details class="history"><summary>${esc(bank.find(p=>p.id===w.taskId)?.[ctx.lang]?.title)} · ${resultSummary(w)}</summary><pre class="code-block olymp-code-review">${esc(w.code)}</pre><div class="olymp-actions">${button('review',t('Оқушы кодын қайта тексеру','Перепроверить код ученика'),`data-work="${esc(w.id)}"`,'primary')}</div><p>${t('Кіріс','Ввод')}</p><pre class="code-block">${esc(w.inputData)}</pre><p>${t('Соңғы нәтиже','Последний вывод')}</p><pre class="console">${esc(w.lastOutput)}</pre></details>`).join('')}</details>`:''}`;}).join('')||t('Белсенді оқушы жоқ.','Нет активных учеников.')}</details>`;
  }
  function problem(){
   const p=task(),m=p[ctx.lang],d=draft(p.id);
-  return `${button('back','← '+t('Есептер тізімі','Список задач'),'','quiet')}<div class="olymp-workspace"><article class="card"><span class="badge">${p.number} · ${t('Деңгей','Уровень')} ${p.level}</span><h2>${esc(m.title)}</h2><p class="olymp-statement">${esc(m.statement)}</p><h3>${t('Кіріс деректері','Входные данные')}</h3><p>${esc(m.input)}</p><h3>${t('Шығыс деректері','Выходные данные')}</h3><p>${esc(m.output)}</p><h3>${t('Шектеулер','Ограничения')}</h3><p>${esc(p.limits)}</p><h3>${t('Мысалдар','Примеры')}</h3><div class="olymp-examples">${p.examples.map((e,i)=>`<div class="olymp-example"><div><strong>${t('Кіріс','Ввод')} ${i+1}</strong><pre class="code-block">${esc(e.input)}</pre>${button('example',t('Кіріске қою','Подставить ввод'),`data-example="${i}"`)}</div><div><strong>${t('Шығыс','Вывод')} ${i+1}</strong><pre class="code-block">${esc(e.output)}</pre></div></div>`).join('')}</div></article><article class="card olymp-editor-pane"><label class="field">Python 3<textarea class="code-editor olymp-code" data-olymp-field="code" spellcheck="false" autocapitalize="off" aria-label="Python 3">${esc(d.code)}</textarea></label><label class="field">${t('Кіріс деректері','Входные данные')}<textarea class="olymp-input" data-olymp-field="inputData">${esc(d.inputData)}</textarea></label><div class="olymp-actions">${button('run','▶ '+t('Орындау','Запустить'),'','primary')}${button('check',t('Тексеруге жіберу','Проверить тестами'))}${!isTeacher()?button('save',t('Жобаны сақтау','Сохранить черновик')):''}<button type="button" data-olymp="stop" ${!busy?'disabled':''}>■ ${t('Тоқтату','Остановить')}</button></div><p class="compact muted">${t('Алғашқы іске қосуға интернет керек. Әр тестке 8 секунд. Tab — шегініс.','При первом запуске нужен интернет. На тест отводится 8 секунд. Tab — отступ.')}</p><div class="olymp-status" data-olymp-status data-state="${esc(statusKind)}">${esc(status||t('Кодты жазып, орында.','Напиши код и запусти.'))}</div><strong>${t('Нәтиже','Вывод')}</strong><pre class="console olymp-console" data-olymp-output>${esc(d.lastOutput||'—')}</pre></article></div>`;
+  return `${button('back','← '+t('Есептер тізімі','Список задач'),'','quiet')}<div class="olymp-workspace"><article class="card"><span class="badge">${p.number} · ${t('Деңгей','Уровень')} ${p.level}</span><h2>${esc(m.title)}</h2>${reviewNotice()}<p class="olymp-statement">${esc(m.statement)}</p><h3>${t('Кіріс деректері','Входные данные')}</h3><p>${esc(m.input)}</p><h3>${t('Шығыс деректері','Выходные данные')}</h3><p>${esc(m.output)}</p><h3>${t('Шектеулер','Ограничения')}</h3><p>${esc(p.limits)}</p><h3>${t('Мысалдар','Примеры')}</h3><div class="olymp-examples">${p.examples.map((e,i)=>`<div class="olymp-example"><div><strong>${t('Кіріс','Ввод')} ${i+1}</strong><pre class="code-block">${esc(e.input)}</pre>${button('example',t('Кіріске қою','Подставить ввод'),`data-example="${i}"`)}</div><div><strong>${t('Шығыс','Вывод')} ${i+1}</strong><pre class="code-block">${esc(e.output)}</pre></div></div>`).join('')}</div></article><article class="card olymp-editor-pane"><label class="field">Python 3<textarea class="code-editor olymp-code" data-olymp-field="code" spellcheck="false" autocapitalize="off" aria-label="Python 3">${esc(d.code)}</textarea></label><label class="field">${t('Кіріс деректері','Входные данные')}<textarea class="olymp-input" data-olymp-field="inputData">${esc(d.inputData)}</textarea></label><div class="olymp-actions">${button('run','▶ '+t('Орындау','Запустить'),'','primary')}${button('check',isTeacher()&&review?t('Оқушы кодын қайта тексеру','Перепроверить код ученика'):t('Тексеруге жіберу','Проверить тестами'))}${!isTeacher()?button('save',t('Жобаны сақтау','Сохранить черновик')):''}<button type="button" data-olymp="stop" ${!busy?'disabled':''}>■ ${t('Тоқтату','Остановить')}</button></div><p class="compact muted">${t('Алғашқы іске қосуға интернет керек. Әр тестке 8 секунд. Tab — шегініс.','При первом запуске нужен интернет. На тест отводится 8 секунд. Tab — отступ.')}</p><div class="olymp-status" data-olymp-status data-state="${esc(statusKind)}">${esc(status||t('Кодты жазып, орында.','Напиши код и запусти.'))}</div><p class="compact" data-olymp-result>${esc(editorSummary())}</p><strong>${t('Нәтиже','Вывод')}</strong><pre class="console olymp-console" data-olymp-output>${esc(d.lastOutput||'—')}</pre></article></div>`;
  }
+
  async function save(submission){
-  if(isTeacher())return;
   const id=selected,d=draft(id),owner=ctx.user.id;
+  if(isTeacher()){
+   if(!review||submission?.submit!==true||d.code!==review.code)return false;
+   const row=await ctx.api('reviewOlympiadWork',{workId:review.id,code:d.code,expectedUpdatedAt:review.updatedAt,passed:submission.passed,verdict:submission.verdict});
+   if(owner!==ctx.user?.id)return false;
+   data.work=data.work.filter(w=>w.id!==row.id);data.work.push(row);review.updatedAt=row.__updatedAt;return true;
+  }
   const row=await ctx.api('saveOlympiadWork',{taskId:id,...d,lastOutput:d.lastOutput.slice(0,12000),...submission});
-  if(owner!==ctx.user?.id)return;
+  if(owner!==ctx.user?.id)return false;
   data.work=data.work.filter(w=>w.taskId!==id);data.work.push(row);
   try{localStorage.removeItem(key(id));}catch{}
+  return true;
  }
  function leave(){epoch++;job++;clearTimeout(timer);worker?.terminate();worker=null;busy=false;actionBusy=false;}
  async function run(check){
@@ -59,11 +84,11 @@
   if(!d.code.trim()){status=t('Алдымен Python кодын жаз.','Сначала напиши Python-код.');statusPaint();return;}
   busy=true;statusKind='';status=t('Python жүктелуде…','Загрузка Python…');statusPaint();
   const runId=++job,code=d.code,input=d.inputData,cases=check?p.tests:[{input}],inputs=cases.map(model.expand);let passed=0,index=0,finishing=false;
-  worker=new Worker('olympiad-worker.js?v=12.0.0');
+  worker=new Worker('olympiad-worker.js?v=12.2.1');
   const finish=async(verdict,message)=>{
    if(finishing||runId!==job)return;finishing=true;clearTimeout(timer);worker?.terminate();worker=null;
    statusKind=verdict;status=message;busy=false;actionBusy=true;statusPaint();
-   try{await save(check?{submit:true,passed,verdict}:{});if(runId!==job)return;if(!isTeacher())status+=' · '+t('Сақталды','Сохранено');}
+   try{const saved=await save(check?{submit:true,passed,verdict}:{});if(runId!==job)return;if(saved)status+=' · '+t('Сақталды','Сохранено');else if(isTeacher()&&review&&check)status+=' · '+t('Өзгертілген код: тек мұғалімнің сынағы','Код изменён: только проба учителя');}
    catch(e){persist(p.id);status+='\n'+t('Браузерде сақталды; базаға сақтау қатесі: ','Сохранено в браузере; ошибка записи в базу: ')+e.message;}
    finally{if(runId===job){actionBusy=false;statusPaint();}}
   };
@@ -86,17 +111,26 @@
   worker.postMessage({type:'start',code,inputs});
   window.CT_OLYMPIAD.stopRun=()=>finish('stopped',t('Орындау тоқтатылды.','Выполнение остановлено.'));
  }
- document.addEventListener('input',e=>{const field=e.target.closest('#olympiadRoot [data-olymp-field]');if(!field||!selected)return;draft(selected)[field.dataset.olympField]=field.value;persist(selected);});
- document.addEventListener('keydown',e=>{if(e.key==='Tab'&&!e.shiftKey&&e.target.matches('#olympiadRoot .olymp-code')){e.preventDefault();e.target.setRangeText('    ',e.target.selectionStart,e.target.selectionEnd,'end');draft(selected).code=e.target.value;persist(selected);}});
+ document.addEventListener('input',e=>{const field=e.target.closest('#olympiadRoot [data-olymp-field]');if(!field||!selected)return;draft(selected)[field.dataset.olympField]=field.value;persist(selected);if(field.dataset.olympField==='code')codeChanged();else paintEditorSummary();});
+ document.addEventListener('keydown',e=>{if(e.key==='Tab'&&!e.shiftKey&&e.target.matches('#olympiadRoot .olymp-code')){e.preventDefault();e.target.setRangeText('    ',e.target.selectionStart,e.target.selectionEnd,'end');draft(selected).code=e.target.value;persist(selected);codeChanged();}});
  document.addEventListener('click',async e=>{
   const b=e.target.closest('#olympiadRoot [data-olymp]');if(!b||b.disabled)return;const action=b.dataset.olymp;
   if(action==='stop'){window.CT_OLYMPIAD.stopRun?.();return;}
   if(busy||actionBusy)return;
   try{
-   if(action==='open'){selected=b.dataset.task;status='';statusKind='';repaint();}
-   else if(action==='back'){selected='';status='';repaint();}
+   if(action==='open'){review=null;selected=b.dataset.task;status='';statusKind='';repaint();}
+   else if(action==='back'){review=null;selected='';status='';repaint();}
    else if(action==='level'){level=Number(b.dataset.level);repaint();}
    else if(action==='example'){draft(selected).inputData=task().examples[Number(b.dataset.example)].input;persist(selected);repaint();}
+   
+   else if(action==='review'){
+    if(!isTeacher())return;
+    const w=data.work.find(w=>w.id===b.dataset.work);if(!w)throw Error(t('Жұмыс табылмады','Работа не найдена'));
+    const pupil=data.users.find(u=>u.id===w.userId);
+    selected=w.taskId;review={id:w.id,userId:w.userId,name:pupil?.name||w.userId,code:w.code,updatedAt:w.__updatedAt};
+    drafts.set(selected,{code:w.code,inputData:w.inputData||'',lastOutput:w.lastOutput||''});
+    status='';statusKind='';repaint();await run(true);
+   }
    else if(action==='run'||action==='check')await run(action==='check');
    else if(action==='save'){actionBusy=true;statusPaint();await save({});status=t('Жоба базаға сақталды.','Черновик сохранён в базе.');actionBusy=false;statusPaint();}
    else if(action==='reload'){actionBusy=true;statusPaint();await load(ctx);actionBusy=false;repaint();}

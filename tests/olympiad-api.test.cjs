@@ -53,3 +53,39 @@ test('locked pupil cannot save or grant access; practice save cannot change grad
  await assert.rejects(pupil.call('saveOlympiadWork',{taskId:'olymp-99',code:'print(1)'}));
  await assert.rejects(pupil.call('saveOlympiadWork',{taskId:'olymp-01',code:'print(1)',submit:true,passed:0,verdict:'accepted'}));
 });
+
+test('saving or running unchanged code preserves every checked verdict; editing invalidates only the current result',async()=>{
+ const s=school(),p=s.client('s1'),t=s.client('t');await t.call('setOlympiadAccess',{userId:'s1',allowed:true});
+ const code='print(3)',count=11;
+ for(const verdict of ['accepted','wrong','error','timeout','stopped']){
+  const passed=verdict==='accepted'?count:2;
+  const checked=await p.call('saveOlympiadWork',{taskId:'olymp-01',code,submit:true,passed,verdict});
+  const saved=await p.call('saveOlympiadWork',{taskId:'olymp-01',code,inputData:'different input',lastOutput:'different personal run',verdict:'draft',passed:0,total:0});
+  assert.equal(saved.verdict,verdict);assert.equal(saved.passed,passed);assert.equal(saved.total,count);assert.equal(saved.submissions,checked.submissions);
+ }
+ const before=s.db.get('OlympiadWork/s1__olymp-01').submissions;
+ const edited=await p.call('saveOlympiadWork',{taskId:'olymp-01',code:'print(0)',verdict:'accepted',passed:11,total:11});
+ assert.equal(edited.verdict,'draft');assert.equal(edited.passed,0);assert.equal(edited.total,0);assert.equal(edited.submissions,before);assert.equal(edited.solved,true);
+});
+test('teacher can restore a legacy 0/0 record by rechecking exactly the saved code without awarding XP or changing submissions',async()=>{
+ const s=school(),p=s.client('s1'),t=s.client('t');await t.call('setOlympiadAccess',{userId:'s1',allowed:true});
+ await p.call('saveOlympiadWork',{taskId:'olymp-01',code:'print(3)',inputData:'abc\\nbcd',submit:true,passed:11,verdict:'accepted'});
+ const legacy=s.db.get('OlympiadWork/s1__olymp-01');Object.assign(legacy,{verdict:'draft',passed:0,total:0});
+ const args={workId:legacy.id,code:legacy.code,expectedUpdatedAt:legacy.__updatedAt,passed:11,verdict:'accepted'},before=s.trace.length;
+ const saved=await t.call('reviewOlympiadWork',args);
+ assert.equal(saved.verdict,'accepted');assert.equal(saved.passed,11);assert.equal(saved.total,11);assert.equal(saved.submissions,1);assert.equal(saved.code,'print(3)');assert.equal(saved.userId,'s1');
+ assert.ok(s.trace.slice(before).every(w=>['Users/t','OlympiadWork/s1__olymp-01'].includes(w.key)));
+ await assert.rejects(p.call('reviewOlympiadWork',{...args,expectedUpdatedAt:saved.__updatedAt}));
+ await assert.rejects(t.call('reviewOlympiadWork',args)); // stale version
+ await assert.rejects(t.call('reviewOlympiadWork',{...args,expectedUpdatedAt:saved.__updatedAt,code:'print(0)'}));
+ const failed=await t.call('reviewOlympiadWork',{...args,expectedUpdatedAt:saved.__updatedAt,passed:2,verdict:'wrong'});
+ assert.equal(failed.verdict,'wrong');assert.equal(failed.passed,2);assert.equal(failed.solved,true);assert.equal(failed.submissions,1);
+});
+test('teacher recheck rejects invalid verdicts, cross-path IDs and inactive pupil records',async()=>{
+ const s=school(),p=s.client('s1'),t=s.client('t');await t.call('setOlympiadAccess',{userId:'s1',allowed:true});
+ const row=await p.call('saveOlympiadWork',{taskId:'olymp-01',code:'print(3)'});
+ const args={workId:row.id,code:row.code,expectedUpdatedAt:row.__updatedAt,passed:0,verdict:'accepted'};
+ await assert.rejects(t.call('reviewOlympiadWork',args));
+ await assert.rejects(t.call('reviewOlympiadWork',{...args,workId:'../Users/s1'}));
+ s.db.get('Users/s1').active=false;await assert.rejects(t.call('reviewOlympiadWork',{...args,passed:11}));
+});
