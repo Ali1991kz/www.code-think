@@ -176,6 +176,30 @@ service cloud.firestore {
    allow create, update: if valid();
    allow delete: if owner(s);
   }
+  match /schools/{s}/Rankings/{id} {
+   function valid(){
+    let d=request.resource.data;
+    let u=get(/databases/$(database)/documents/schools/$(s)/Users/$(id)).data;
+    return owner(s) && d.userId == id && u.role == 'student' && u.active == true
+     && !exists(/databases/$(database)/documents/schools/$(s)/DeletedPupils/$(id))
+     && d.name == u.name && d.classId == get(/databases/$(database)/documents/schools/$(s)/ClassStudents/$(id)).data.classId
+     && text(d.className,100) && d.grade in ['7','8']
+     && d.avatar in ['robot','rocket','owl','cat','turtle','star']
+     && d.xp is int && d.xp >= 0 && d.completed is int && d.completed >= 0
+     && d.corrections is int && d.corrections >= 0
+     && d.badges is list && d.badges.size() <= 5 && d.badges.hasOnly(['first','five','ten','corrected','persistent'])
+     && d.weekKey is string && d.weekKey.matches('[0-9]{4}-[0-9]{2}-[0-9]{2}')
+     && d.weekStartXP is int && d.weekStartXP >= 0 && d.weeklyXP is int && d.weeklyXP >= 0
+     && d.weeklyXP == (d.xp > d.weekStartXP ? d.xp - d.weekStartXP : 0)
+     && d.baselineXP is int && d.baselineXP >= 0 && d.growthXP is int && d.growthXP >= 0
+     && d.growthXP == (d.xp > d.baselineXP ? d.xp - d.baselineXP : 0)
+     && text(d.trackingSince,40) && d.trackingSince.size() > 0 && d.updatedAt == request.time
+     && d.keys().hasOnly(['userId','name','classId','className','grade','avatar','xp','completed','corrections','badges','weekKey','weekStartXP','weeklyXP','baselineXP','growthXP','trackingSince','updatedAt']);
+   }
+   allow read: if owner(s) || (student(s) && resource.data.classId == communityClass(s));
+   allow create, update: if valid();
+   allow delete: if owner(s);
+  }
   match /schools/{s}/DebugLabWork/{id} {
    function valid(){
     let d=request.resource.data;

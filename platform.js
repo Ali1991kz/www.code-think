@@ -769,6 +769,23 @@
   const renderBeforeDebugLab=render;
   render=function(){window.CT_DEBUG_LAB.context(debugLabContext());if(!(page==='debug-lab'||(user?.role==='teacher'&&teacherTab==='debug-lab')))window.CT_DEBUG_LAB.leave();renderBeforeDebugLab();};
 
+  // 12.2: class-only rankings from teacher-published progress.
+  const navBeforeRanking=nav;
+  nav=function(){return navBeforeRanking().replace('</nav>',action('page',t('🏆 Рейтинг','🏆 Рейтинг'),page==='ranking'?'active':'','data-page="ranking"')+'</nav>');};
+  const studentBeforeRanking=studentView;
+  studentView=function(){return page==='ranking'?nav()+window.CT_RANKING.html():studentBeforeRanking();};
+  const teacherBeforeRanking=teacherView;
+  teacherView=function(){let html=teacherBeforeRanking();html=html.replace('</nav>',action('teacher-tab',t('🏆 Рейтинг','🏆 Рейтинг'),teacherTab==='ranking'?'active':'','data-tab="ranking"')+'</nav>');return teacherTab==='ranking'?html.slice(0,html.indexOf('</nav>')+6)+window.CT_RANKING.html():html;};
+  const rankingContext=()=>({user,lang,api});
+  const pageBeforeRanking=actions.page;
+  actions.page=async b=>{window.CT_RANKING.leave();await pageBeforeRanking(b);if(page==='ranking')await window.CT_RANKING.load(rankingContext());};
+  const tabBeforeRanking=actions['teacher-tab'];
+  actions['teacher-tab']=async b=>{window.CT_RANKING.leave();await tabBeforeRanking(b);if(teacherTab==='ranking')await window.CT_RANKING.load(rankingContext());};
+  const refreshBeforeRanking=actions.refresh;
+  actions.refresh=async b=>{await refreshBeforeRanking(b);if(page==='ranking'||(user?.role==='teacher'&&teacherTab==='ranking'))await window.CT_RANKING.load(rankingContext());};
+  const renderBeforeRanking=render;
+  render=function(){window.CT_RANKING.context(rankingContext());if(!(page==='ranking'||(user?.role==='teacher'&&teacherTab==='ranking')))window.CT_RANKING.leave();renderBeforeRanking();};
+
   boot();
 })();
 
