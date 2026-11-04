@@ -176,6 +176,24 @@ service cloud.firestore {
    allow create, update: if valid();
    allow delete: if owner(s);
   }
+  match /schools/{s}/DebugLabWork/{id} {
+   function valid(){
+    let d=request.resource.data;
+    return d.id == id && id == d.userId + '__' + d.labId && d.__ownerId == d.userId
+     && d.labId.matches('lab-0[1-8]') && d.selfReported == true && d.hintUsed is bool
+     && text(d.inputData,1000) && text(d.prediction,100) && text(d.buggyOutput,2000) && text(d.expectedOutput,100)
+     && text(d.explanation,4000) && text(d.fixedCode,20000) && text(d.fixedOutput,4000)
+     && d.found is bool && d.passed is int && d.total is int && d.passed >= 0 && d.passed <= d.total && d.total <= 10
+     && d.status in ['draft','witness','practiced']
+     && (d.status != 'practiced' || (d.found == true && d.total > 0 && d.passed == d.total && d.fixedCode.size()>0 && d.explanation.size()>0))
+     && d.keys().hasOnly(['id','userId','__ownerId','labId','inputData','prediction','buggyOutput','expectedOutput','explanation','fixedCode','fixedOutput','found','passed','total','status','hintUsed','selfReported','__createdAt','__updatedAt']) && meta();
+   }
+   allow get: if owner(s) || (student(s) && baseline(s) && id.matches(uid() + '__lab-0[1-8]'));
+   allow list: if owner(s) || (student(s) && baseline(s) && resource.data.__ownerId == uid());
+   allow create: if valid() && created() && (owner(s) || (student(s) && baseline(s) && mine(s,request.resource.data)));
+   allow update: if valid() && (owner(s) || (student(s) && baseline(s) && mine(s,request.resource.data) && immutableOwner() && request.resource.data.__createdAt == resource.data.__createdAt));
+   allow delete: if owner(s);
+  }
   function olympiadOpen(s){return student(s) && get(/databases/$(database)/documents/schools/$(s)/OlympiadAccess/$(uid())).data.allowed == true;}
   match /schools/{s}/OlympiadAccess/{id} {
    allow get: if owner(s) || (student(s) && id == uid());
@@ -372,5 +390,6 @@ service cloud.firestore {
   }
  }
 }
+
 
 

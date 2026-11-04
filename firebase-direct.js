@@ -183,6 +183,33 @@
   }catch(e){throw e;}
  }
 
+ // Debugging lab: evidence from the pupil's browser, separate from grades/XP.
+ async function debugLabWorkspace(){
+  if(profile.role==='teacher'){
+   const [state,docs]=await Promise.all([load(['Users'],null,{},'teacherDashboard'),queryDocuments('DebugLabWork')]);
+   return {allowed:true,users:state.tables.Users.filter(u=>u.role==='student'&&String(u.active)==='true'&&!u.deletedAt).map(u=>({id:u.id,name:u.name,grade:u.grade,className:u.className})),work:docs.map(decode)};
+  }
+  requirePupil();const d=await getDoc(path('Attempts',profile.id+'_baseline'));
+  const allowed=!!d&&['submitted','graded'].includes(decode(d).status);
+  return {allowed,grade:String(profile.grade),work:allowed?(await queryDocuments('DebugLabWork',[['__ownerId',profile.id]])).map(decode):[]};
+ }
+ async function saveDebugLabWork(p){
+  requirePupil();const state=await debugLabWorkspace();
+  if(!state.allowed)throw Error('Алдымен бастапқы диагностиканы аяқта. / Сначала заверши начальную диагностику.');
+  const model=window.CT_DEBUG_LAB_MODEL,task=model.bank.find(t=>t.id===p.labId&&t.grade===String(profile.grade));
+  if(!task)throw Error('Зертхана тапсырмасы табылмады. / Задание лаборатории не найдено.');
+  const str=(key,max)=>{const v=String(p[key]||'');if(v.length>max)throw Error('Жауап тым ұзын. / Ответ слишком длинный.');return v;};
+  const inputData=str('inputData',1000),prediction=str('prediction',100),buggyOutput=str('buggyOutput',2000),explanation=str('explanation',4000),fixedCode=str('fixedCode',20000),fixedOutput=str('fixedOutput',4000);
+  const valid=model.parse(task,inputData).ok,expectedOutput=valid?model.expected(task,inputData):'';
+  const found=p.found===true&&valid&&model.equal(prediction,expectedOutput)&&!model.equal(buggyOutput,expectedOutput);
+  const total=found?task.tests.length+1:0,passed=Number(p.passed||0);
+  if(!Number.isInteger(passed)||passed<0||passed>total)throw Error('Тексеру дерегі жарамсыз. / Некорректные данные проверки.');
+  const status=found&&explanation.trim()&&fixedCode.trim()&&passed===total?'practiced':found?'witness':'draft';
+  const id=profile.id+'__'+task.id,name=path('DebugLabWork',id),old=await getDoc(name);
+  const obj={id,userId:profile.id,__ownerId:profile.id,labId:task.id,inputData,prediction,buggyOutput,expectedOutput,explanation,fixedCode,fixedOutput,found,passed,total,status,hintUsed:p.hintUsed===true,selfReported:true};
+  await commit([documentWrite(name,obj,old)]);return decode(await getDoc(name));
+ }
+
  // Olympiad preparation: teacher-managed access and self-reported browser checks.
  // Practice verdicts never update grades, SkillScores, CommunityScores or XP.
  const olympiadTables=['Users','ClassStudents','Tasks','Assignments','TaskAttempts'];
@@ -445,7 +472,7 @@
   const [ss,ee,cc]=await Promise.all([queryDocuments('TaskSteps',[['attemptId',id]]),queryDocuments('LearningEvidence',[['attemptId',id]]),queryDocuments('Corrections',[['sourceId',id]])]);
   return {attempt:at,assignment:a,task:td?decode(td):{},student:window.CT_CORE.create({},profile).publicUser(decode(ud)),steps:ss.map(decode),evidence:ee.map(decode),corrections:cc.map(decode).filter(c=>c.userId===at.userId&&c.kind==='task')};
  }
- const purgeTables=['ClassStudents','Attempts','Answers','DiagnosticProfiles','MethodProgress','TaskAttempts','TaskSteps','SkillScores','Events','Corrections','LearningEvidence','TransferProbes','StudentProfiles','RegistrationJobs','TaskTimes','Presence','CommunityScores','OlympiadAccess','OlympiadWork'];
+ const purgeTables=['ClassStudents','Attempts','Answers','DiagnosticProfiles','MethodProgress','TaskAttempts','TaskSteps','SkillScores','Events','Corrections','LearningEvidence','TransferProbes','StudentProfiles','RegistrationJobs','TaskTimes','Presence','CommunityScores','OlympiadAccess','OlympiadWork','DebugLabWork'];
  async function purgeDocuments(userId){
   const groups=await Promise.all(purgeTables.map(async table=>({table,docs:await queryDocuments(table,[[['Answers','TaskSteps','LearningEvidence'].includes(table)?'__ownerId':'userId',userId]])})));
   for(const table of ['identities','loginRoutes','LoginHandoffs'])groups.push({table,docs:await queryDocuments(table,[['schoolId',identity.schoolId],['userId',userId]],true)});
@@ -568,7 +595,7 @@
   result.ped=(names.includes('LearningEvidence')||names.includes('TransferProbes'))?core.run('pedagogyWorkspace'):{evidence:[],probes:[],reviews:[]};
   await commit(writesFor(state,core));if(!teacher)result.studentProfile=await studentProfile();else result.teacherProfile=await teacherProfile();if(teacher&&view==='students'){result.temporaryPasswords=await temporaryPasswords(state.tables.Users);result.purgeJobs=(await queryDocuments('PurgeJobs',[['status','deleting']])).map(decode);}result.timings=await timingWorkspace();return result;
  }
- const backupTables=[...Object.keys(window.CT_CORE.schemas).filter(n=>n!=='Sessions'),'TeacherSolutions','TaskChecks','TaskTimes','OlympiadAccess','OlympiadWork'];
+ const backupTables=[...Object.keys(window.CT_CORE.schemas).filter(n=>n!=='Sessions'),'TeacherSolutions','TaskChecks','TaskTimes','OlympiadAccess','OlympiadWork','DebugLabWork'];
  async function exportBackup(){
   if(profile.role!=='teacher')throw Error('Мұғалім құқығы қажет. / Нужны права учителя.');
   const state=await load(backupTables,{optimistic:true}),tables={};
@@ -596,7 +623,7 @@
     if(item.backupOwner&&!users.has(item.backupOwner)){skipped++;continue;}
     const raw=Object.fromEntries(Object.entries(item).filter(([k])=>!k.startsWith('backup')&&!k.startsWith('__')&&!['password','temporaryPassword','passwordHash','passwordSalt','accessCodeHash','teacherAccessCode'].includes(k)));
     if(item.backupOwner)raw.__ownerId=item.backupOwner;
-    const obj=['TeacherSolutions','TaskChecks','TaskTimes','OlympiadAccess','OlympiadWork'].includes(table)?raw:clean(table,raw,state.tables);
+    const obj=['TeacherSolutions','TaskChecks','TaskTimes','OlympiadAccess','OlympiadWork','DebugLabWork'].includes(table)?raw:clean(table,raw,state.tables);
     const write=documentWrite(name,obj,null);
     if(item.backupSubmittedAt){if(!Number.isFinite(Date.parse(item.backupSubmittedAt)))throw Error('Уақыт мәні қате. / Неверная дата.');write.update.fields.__submittedAt={timestampValue:item.backupSubmittedAt};}
     writes.push(write);
@@ -639,6 +666,8 @@
   if(action==='timingWorkspace')return timingWorkspace();
   if(action==='communityWorkspace')return communityWorkspace();
   if(action==='olympiadWorkspace')return olympiadWorkspace();
+  if(action==='debugLabWorkspace')return debugLabWorkspace();
+  if(action==='saveDebugLabWork')return saveDebugLabWork(p);
   if(action==='setOlympiadAccess')return setOlympiadAccess(p);
   if(action==='saveOlympiadWork')return saveOlympiadWork(p);
   if(action==='saveConclusionQuiz')return saveConclusionQuiz(p);
@@ -661,5 +690,6 @@
  }
  window.CT_FIREBASE={call(action,p={}){const task=queue.then(()=>dispatch(action,p));queue=task.catch(()=>{});return task.catch(e=>{throw friendly(e);});},invalidate:()=>readCache.clear(),status:()=>({signedIn:!!session,project,version:'12.0.0',customStudentLogins:true}),_test:local?{val,plain,rowKey,decode,root}:undefined};
 })();
+
 
 
