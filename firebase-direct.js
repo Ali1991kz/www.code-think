@@ -178,8 +178,61 @@
    const core=window.CT_CORE.create(state.tables,u,p,materials),result=core.run(action);
    await commit(writesFor(state,core),tx);
    if(profile.role==='teacher'&&['gradeTask','gradeCorrection','gradeTransfer','enrollStudent','updateStudent'].includes(action))await syncCommunityScores(true).catch(()=>{communitySyncedAt=0;});
+   if(profile.role==='teacher'&&['gradeTask','enrollStudent','updateStudent'].includes(action))await syncOlympiadAccess().catch(()=>{});
    return result;
   }catch(e){throw e;}
+ }
+
+ // Olympiad preparation: teacher-managed access and self-reported browser checks.
+ // Practice verdicts never update grades, SkillScores, CommunityScores or XP.
+ const olympiadTables=['Users','ClassStudents','Tasks','Assignments','TaskAttempts'];
+ const olympiadTask=id=>window.CT_OLYMPIAD_BANK.find(t=>t.id===id);
+ async function syncOlympiadAccess(){
+  requireTeacher();
+  const oldDocs=await queryDocuments('OlympiadAccess'),old=new Map(oldDocs.map(d=>[decode(d).userId,d]));
+  const state=await load(olympiadTables,{optimistic:true}),writes=[];
+  for(const u of state.tables.Users.filter(u=>u.role==='student'&&String(u.active)==='true'&&!u.deletedAt)){
+   const d=old.get(u.id),prior=d&&decode(d);if(prior?.manual)continue;
+   const ready=window.CT_OLYMPIAD_MODEL.readiness(state.tables,u),obj={userId:u.id,...ready,manual:false};
+   if(prior&&Object.entries(obj).every(([k,v])=>prior[k]===v))continue;
+   writes.push(documentWrite(path('OlympiadAccess',u.id),obj,d));
+  }
+  for(let i=0;i<writes.length;i+=4)await commit(writes.slice(i,i+4));
+  return state;
+ }
+ async function olympiadWorkspace(){
+  if(profile.role==='teacher'){
+   const state=await syncOlympiadAccess();
+   const [access,work]=await Promise.all([queryDocuments('OlympiadAccess'),queryDocuments('OlympiadWork')]);
+   return {allowed:true,users:state.tables.Users.filter(u=>u.role==='student'&&String(u.active)==='true'&&!u.deletedAt).map(u=>({id:u.id,name:u.name,grade:u.grade,className:u.className,...window.CT_OLYMPIAD_MODEL.readiness(state.tables,u)})),access:access.map(decode),work:work.map(decode)};
+  }
+  requirePupil();const access=await getDoc(path('OlympiadAccess',profile.id)),entry=access&&decode(access);
+  const state=await load(olympiadTables,null,{},'studentWorkspace');
+  const ready=window.CT_OLYMPIAD_MODEL.readiness(state.tables,profile);
+  return {allowed:entry?.allowed===true,...{completed:ready.completed,total:ready.total},work:entry?.allowed===true?(await queryDocuments('OlympiadWork',[['__ownerId',profile.id]])).map(decode):[]};
+ }
+ async function setOlympiadAccess(p){
+  requireTeacher();const d=await getDoc(path('Users',String(p.userId||''))),u=d&&decode(d);
+  if(!u||u.role!=='student'||String(u.active)!=='true'||u.deletedAt)throw Error('Белсенді оқушыны таңдаңыз. / Выберите активного ученика.');
+  const state=await load(olympiadTables,{optimistic:true}),ready=window.CT_OLYMPIAD_MODEL.readiness(state.tables,u);
+  const name=path('OlympiadAccess',u.id),old=await getDoc(name),manual=p.mode!=='auto';
+  if(manual&&typeof p.allowed!=='boolean')throw Error('Қолжетімділікті таңдаңыз. / Выберите доступ.');
+  await commit([documentWrite(name,{userId:u.id,...ready,allowed:manual?p.allowed:ready.allowed,manual},old)]);
+  return olympiadWorkspace();
+ }
+ async function saveOlympiadWork(p){
+  requirePupil();const task=olympiadTask(String(p.taskId||''));
+  if(!task)throw Error('Есеп табылмады. / Задача не найдена.');
+  const access=await getDoc(path('OlympiadAccess',profile.id));
+  if(!access||decode(access).allowed!==true)throw Error('Олимпиада бөлімі әлі ашылмаған. / Раздел олимпиады ещё не открыт.');
+  const code=String(p.code||''),inputData=String(p.inputData||''),lastOutput=String(p.lastOutput||'');
+  if(code.length>20000||inputData.length>200000||lastOutput.length>12000)throw Error('Код немесе кіріс тым ұзын. / Код или ввод слишком длинный.');
+  const id=profile.id+'__'+task.id,name=path('OlympiadWork',id),old=await getDoc(name),prior=old?decode(old):{};
+  const submitted=p.submit===true,total=submitted?task.tests.length:0,passed=submitted?Number(p.passed):0;
+  const verdict=submitted?String(p.verdict):'draft';
+  if(submitted&&(!code.trim()||!Number.isInteger(passed)||passed<0||passed>total||!['accepted','wrong','error','timeout','stopped'].includes(verdict)||(verdict==='accepted'&&passed!==total)))throw Error('Тексеру нәтижесі жарамсыз. / Некорректный результат проверки.');
+  const obj={id,userId:profile.id,__ownerId:profile.id,taskId:task.id,code,inputData,lastOutput,verdict,passed,total,submissions:(Number(prior.submissions)||0)+(submitted?1:0),solved:prior.solved===true||verdict==='accepted',selfReported:true};
+  await commit([documentWrite(name,obj,old)]);return decode(await getDoc(name));
  }
 
  // Only a teacher publishes XP. Student heartbeats never contain a score.
@@ -392,7 +445,7 @@
   const [ss,ee,cc]=await Promise.all([queryDocuments('TaskSteps',[['attemptId',id]]),queryDocuments('LearningEvidence',[['attemptId',id]]),queryDocuments('Corrections',[['sourceId',id]])]);
   return {attempt:at,assignment:a,task:td?decode(td):{},student:window.CT_CORE.create({},profile).publicUser(decode(ud)),steps:ss.map(decode),evidence:ee.map(decode),corrections:cc.map(decode).filter(c=>c.userId===at.userId&&c.kind==='task')};
  }
- const purgeTables=['ClassStudents','Attempts','Answers','DiagnosticProfiles','MethodProgress','TaskAttempts','TaskSteps','SkillScores','Events','Corrections','LearningEvidence','TransferProbes','StudentProfiles','RegistrationJobs','TaskTimes','Presence','CommunityScores'];
+ const purgeTables=['ClassStudents','Attempts','Answers','DiagnosticProfiles','MethodProgress','TaskAttempts','TaskSteps','SkillScores','Events','Corrections','LearningEvidence','TransferProbes','StudentProfiles','RegistrationJobs','TaskTimes','Presence','CommunityScores','OlympiadAccess','OlympiadWork'];
  async function purgeDocuments(userId){
   const groups=await Promise.all(purgeTables.map(async table=>({table,docs:await queryDocuments(table,[[['Answers','TaskSteps','LearningEvidence'].includes(table)?'__ownerId':'userId',userId]])})));
   for(const table of ['identities','loginRoutes','LoginHandoffs'])groups.push({table,docs:await queryDocuments(table,[['schoolId',identity.schoolId],['userId',userId]],true)});
@@ -515,7 +568,7 @@
   result.ped=(names.includes('LearningEvidence')||names.includes('TransferProbes'))?core.run('pedagogyWorkspace'):{evidence:[],probes:[],reviews:[]};
   await commit(writesFor(state,core));if(!teacher)result.studentProfile=await studentProfile();else result.teacherProfile=await teacherProfile();if(teacher&&view==='students'){result.temporaryPasswords=await temporaryPasswords(state.tables.Users);result.purgeJobs=(await queryDocuments('PurgeJobs',[['status','deleting']])).map(decode);}result.timings=await timingWorkspace();return result;
  }
- const backupTables=[...Object.keys(window.CT_CORE.schemas).filter(n=>n!=='Sessions'),'TeacherSolutions','TaskChecks','TaskTimes'];
+ const backupTables=[...Object.keys(window.CT_CORE.schemas).filter(n=>n!=='Sessions'),'TeacherSolutions','TaskChecks','TaskTimes','OlympiadAccess','OlympiadWork'];
  async function exportBackup(){
   if(profile.role!=='teacher')throw Error('Мұғалім құқығы қажет. / Нужны права учителя.');
   const state=await load(backupTables,{optimistic:true}),tables={};
@@ -543,7 +596,7 @@
     if(item.backupOwner&&!users.has(item.backupOwner)){skipped++;continue;}
     const raw=Object.fromEntries(Object.entries(item).filter(([k])=>!k.startsWith('backup')&&!k.startsWith('__')&&!['password','temporaryPassword','passwordHash','passwordSalt','accessCodeHash','teacherAccessCode'].includes(k)));
     if(item.backupOwner)raw.__ownerId=item.backupOwner;
-    const obj=['TeacherSolutions','TaskChecks','TaskTimes'].includes(table)?raw:clean(table,raw,state.tables);
+    const obj=['TeacherSolutions','TaskChecks','TaskTimes','OlympiadAccess','OlympiadWork'].includes(table)?raw:clean(table,raw,state.tables);
     const write=documentWrite(name,obj,null);
     if(item.backupSubmittedAt){if(!Number.isFinite(Date.parse(item.backupSubmittedAt)))throw Error('Уақыт мәні қате. / Неверная дата.');write.update.fields.__submittedAt={timestampValue:item.backupSubmittedAt};}
     writes.push(write);
@@ -560,7 +613,7 @@
 
  async function dispatch(action,p={}){
   if(!project||!key)throw Error('Firebase config.js баптауларын толтырыңыз. / Заполните Firebase config.js.');
-  if(action==='ping')return {version:'11.9.0',backend:'firebase-direct',plan:'Spark',customStudentLogins:true};
+  if(action==='ping')return {version:'12.0.0',backend:'firebase-direct',plan:'Spark',customStudentLogins:true};
   if(action==='logout'){clear();return {loggedOut:true};}
   if(action==='setupTeacher'){const r=await setupTeacher(p);if(!r.needsApproval&&profile?.role==='teacher')await vault.unlock(profile,String(p.password));return r;}
   if(action==='login'){
@@ -585,6 +638,9 @@
   if(action==='saveTeacherProfile')return saveTeacherProfile(p);
   if(action==='timingWorkspace')return timingWorkspace();
   if(action==='communityWorkspace')return communityWorkspace();
+  if(action==='olympiadWorkspace')return olympiadWorkspace();
+  if(action==='setOlympiadAccess')return setOlympiadAccess(p);
+  if(action==='saveOlympiadWork')return saveOlympiadWork(p);
   if(action==='saveConclusionQuiz')return saveConclusionQuiz(p);
   if(action==='recordTaskTime')return recordTaskTime(p);
   if(action==='teacherReviewWorkspace')return teacherReviewWorkspace(p);
@@ -603,6 +659,7 @@
   }
   return learning(action,p);
  }
- window.CT_FIREBASE={call(action,p={}){const task=queue.then(()=>dispatch(action,p));queue=task.catch(()=>{});return task.catch(e=>{throw friendly(e);});},invalidate:()=>readCache.clear(),status:()=>({signedIn:!!session,project,version:'11.9.0',customStudentLogins:true}),_test:local?{val,plain,rowKey,decode,root}:undefined};
+ window.CT_FIREBASE={call(action,p={}){const task=queue.then(()=>dispatch(action,p));queue=task.catch(()=>{});return task.catch(e=>{throw friendly(e);});},invalidate:()=>readCache.clear(),status:()=>({signedIn:!!session,project,version:'12.0.0',customStudentLogins:true}),_test:local?{val,plain,rowKey,decode,root}:undefined};
 })();
+
 

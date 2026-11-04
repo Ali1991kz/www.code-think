@@ -1,8 +1,26 @@
-# CODE THINK 11.9.0
+# CODE THINK 12.0.0
 
 Static Python learning platform: 31 tasks, grades 7–8 (19/12), Kazakh and Russian.
 GitHub Pages hosts the site. Firebase Auth and Firestore store accounts/progress.
 Firebase Spark remains supported; no Apps Script, Cloud Functions or paid upgrade.
+
+## 12.0 olympiad preparation
+
+The teacher's Pedagogy tab is replaced by Olympiad Preparation; pupils also get
+an Olympiad tab. Fifteen bilingual adapted grade-8 tasks cover strings, persistent
+versions and height-route queries. Each includes constraints, I/O, two examples,
+a Python editor and additional browser practice checks (158 cases total).
+
+Grade-8 access opens after all 12 canonical core problems are teacher-graded.
+Teachers can grant/revoke access manually. Drafts and self-reported practice
+results are saved separately from grades and XP. Practice tests are public static
+assets, not a secure competition judge. Publish the updated Firestore Rules
+separately before using access/progress. See [setup and teacher guide](UPDATE_12_0_KK.md).
+
+Validation: `python tests/build_olympiad_bank.py --check` and
+`node --test tests/community.test.cjs tests/olympiad.test.cjs tests/olympiad-api.test.cjs`.
+The independent executable checks include all 158 cases, 30 examples, small-case
+algorithm comparisons, access control at the API layer and the Python I/O harness.
 
 ## 11.9 online participants and XP ticker
 
