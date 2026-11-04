@@ -28,5 +28,24 @@
   const commands=task===10?['1 '+n+' 2 3',n+' 1 2 3']:task===14?['1 1 '+n+' 2 3','2 '+n+' 1','1 1 '+n+' 2 3']:['1 1 2 3 '+n+' 2 3 '+n,'2 '+n+' 1','1 1 2 3 '+n+' 2 3 '+n];
   return n+' '+commands.length+'\n'+h+'\n'+commands.join('\n')+'\n';
  }
- window.CT_OLYMPIAD_MODEL={readiness,normalize,expand};
+
+ const verdicts=['accepted','wrong','error','timeout','stopped'];
+ function hasResult(row){
+  return !!row&&verdicts.includes(row.verdict)&&Number.isInteger(row.total)&&row.total>0
+   &&Number.isInteger(row.passed)&&row.passed>=0&&row.passed<=row.total
+   &&(row.verdict!=='accepted'||row.passed===row.total);
+ }
+ function workState(row){return hasResult(row)?row.verdict:row&&(row.solved||Number(row.submissions)>0)?'recheck':'untested';}
+ function resultForSave(prior,payload,testCount){
+  if(payload.submit!==true){
+   const keep=prior.code===String(payload.code||'')&&hasResult(prior)&&prior.total===testCount;
+   return keep?{verdict:prior.verdict,passed:prior.passed,total:prior.total}:{verdict:'draft',passed:0,total:0};
+  }
+  const passed=Number(payload.passed),verdict=String(payload.verdict);
+  if(!String(payload.code||'').trim()||!Number.isInteger(passed)||passed<0||passed>testCount
+   ||!verdicts.includes(verdict)||(verdict==='accepted'&&passed!==testCount))
+   throw Error('Тексеру нәтижесі жарамсыз. / Некорректный результат проверки.');
+  return {verdict,passed,total:testCount};
+ }
+ window.CT_OLYMPIAD_MODEL={readiness,normalize,expand,hasResult,workState,resultForSave};
 })();

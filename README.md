@@ -1,8 +1,22 @@
-# CODE THINK 12.2.0
+# CODE THINK 12.2.1
 
 Static Python learning platform: 31 tasks, grades 7–8 (19/12), Kazakh and Russian.
 GitHub Pages hosts the site. Firebase Auth and Firestore store accounts/progress.
 Firebase Spark remains supported; no Apps Script, Cloud Functions or paid upgrade.
+
+## 12.2.1 olympiad result preservation
+
+Saving an unchanged code draft or running a personal example preserves its last
+full-test result. Editing code clears only the current result and requests a
+recheck; previously solved counts remain historical. Unchecked/legacy rows show
+explicit labels instead of a misleading 0/0.
+
+Teachers can recheck a pupil's saved code from the expanded work record. Only the
+exact current code and document version can receive the fresh practice result.
+Edited teacher previews remain separate. Grades, XP, pupil submission counts and
+pupil code are unchanged. Existing Firestore Rules already permit this teacher
+write, so no Rules publication is needed for this patch.
+See [recheck instructions](UPDATE_12_2_1_KK.md).
 
 ## 12.2 class rankings
 
