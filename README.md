@@ -1,8 +1,27 @@
-# CODE THINK 12.1.0
+# CODE THINK 12.2.0
 
 Static Python learning platform: 31 tasks, grades 7–8 (19/12), Kazakh and Russian.
 GitHub Pages hosts the site. Firebase Auth and Firestore store accounts/progress.
 Firebase Spark remains supported; no Apps Script, Cloud Functions or paid upgrade.
+
+## 12.2 class rankings
+
+Pupils and teachers have a bilingual Ranking tab with total XP, weekly XP growth,
+distinct positively reviewed tasks, achievement badges, shared places for ties,
+and a highlighted personal row with the next target. Pupils see their class only;
+teachers choose a class. All values come from teacher-published `Rankings`
+summaries; private goals, credentials and answers are never shared.
+
+Weekly and personal growth start at the first publication. Existing XP stays in
+the total; past weekly history is not inferred. Weeks start Monday 00:00 UTC+5.
+Changing a grade updates the current growth; repeating a review adds no XP.
+Publish the updated Firestore Rules and open Ranking as the teacher once.
+See [setup and scoring rules](UPDATE_12_2_KK.md).
+
+Validation: `node --test tests/ranking.test.cjs tests/ranking-api.test.cjs`.
+Optional real Rules checks are in `tests/ranking-rules.test.cjs` and require a
+local Firestore emulator. Rankings are derived, so learning backups retain the
+underlying work rather than copying dated ranking snapshots.
 
 ## 12.1 debugging laboratory
 
