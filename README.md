@@ -1,8 +1,26 @@
-# CODE THINK 11.8.0
+# CODE THINK 11.9.0
 
 Static Python learning platform: 31 tasks, grades 7–8 (19/12), Kazakh and Russian.
 GitHub Pages hosts the site. Firebase Auth and Firestore store accounts/progress.
 Firebase Spark remains supported; no Apps Script, Cloud Functions or paid upgrade.
+
+## 11.9 online participants and XP ticker
+
+Authenticated pupil and teacher screens include a bilingual, pausable ticker.
+Pupils see their class and teacher; teachers see their own school workspace.
+`Presence` heartbeats use server timestamps, one record per account, a 60-second
+refresh and 150-second expiry. This is recent visible-page activity, not instant
+connection detection. Hidden tabs stop polling. No new index is required.
+
+Only the teacher writes `CommunityScores`, derived with the existing profile XP
+function from reviewed work. Names/class/XP are shared; credentials, answers and
+private profiles stay private. A grading action republishes XP; an open teacher
+screen reconciles every five minutes. Missing XP is shown as pending, not zero.
+The new `firestore.rules` must be published separately in Firebase before this
+feature becomes available. See [setup instructions](UPDATE_11_9_KK.md).
+
+Validation: `node --test tests/community.test.cjs`. A separate real-emulator Rules
+suite is included in `tests/community-rules.test.cjs` (requires Firebase CLI/Java).
 
 ## 11.2 pedagogical revision
 
@@ -88,3 +106,4 @@ TaskTimes records approximate active task/correction seconds separately. Focus, 
 The pupil flow is now Understand, Plan, Code and test, Conclusion. Code and testing share one editor/workspace and retain the existing prediction, execution, comparison and explanation record. Their duplicated stage questionnaires are removed: actual pupil code/prediction and pupil-authored comparison/explanation are saved as the existing evidence dimensions. All 31 source tasks have two bilingual conclusion questions (62 total). Selecting an option immediately shows the correct answer and explanation. First and latest choices are retained separately. This is formative feedback, not an independent controlled assessment; it never automatically awards teacher marks or XP.
 
 Existing submitted originals and grades remain unchanged. Previously saved in-progress conclusion explanations are retained separately when the quiz is adopted. Teachers see first/latest quiz responses. The 15-point contract remains 3 + 3 + (3 code + 3 checking) + 3 conclusion. Existing Firebase Rules and core schemas are unchanged; publish SITE files without a database migration. See UPDATE_11_8_KK.txt.
+
