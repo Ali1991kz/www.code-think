@@ -176,6 +176,37 @@ service cloud.firestore {
    allow create, update: if valid();
    allow delete: if owner(s);
   }
+  function olympiadOpen(s){return student(s) && get(/databases/$(database)/documents/schools/$(s)/OlympiadAccess/$(uid())).data.allowed == true;}
+  match /schools/{s}/OlympiadAccess/{id} {
+   allow get: if owner(s) || (student(s) && id == uid());
+   allow create, update: if owner(s) && request.resource.data.userId == id
+    && get(/databases/$(database)/documents/schools/$(s)/Users/$(id)).data.role == 'student'
+    && request.resource.data.allowed is bool && request.resource.data.manual is bool
+    && request.resource.data.completed is int && request.resource.data.total is int
+    && request.resource.data.total in [12,19] && request.resource.data.completed >= 0 && request.resource.data.completed <= request.resource.data.total
+    && request.resource.data.keys().hasOnly(['userId','allowed','manual','completed','total','__createdAt','__updatedAt']) && meta();
+   allow delete: if owner(s);
+  }
+  match /schools/{s}/OlympiadWork/{id} {
+   function valid(){
+    let d=request.resource.data;
+    return d.id == id && id == d.userId + '__' + d.taskId && d.__ownerId == d.userId
+     && d.taskId.matches('olymp-(0[1-9]|1[0-5])')
+     && text(d.code,20000) && text(d.inputData,200000) && text(d.lastOutput,12000)
+     && d.verdict in ['draft','accepted','wrong','error','timeout','stopped']
+     && d.total is int && d.passed is int && d.passed >= 0 && d.passed <= d.total && d.total <= 20
+     && d.submissions is int && d.submissions >= 0 && d.solved is bool && d.selfReported == true
+     && d.keys().hasOnly(['id','userId','__ownerId','taskId','code','inputData','lastOutput','verdict','passed','total','submissions','solved','selfReported','__createdAt','__updatedAt']) && meta();
+   }
+   allow get: if owner(s) || (olympiadOpen(s) && id.matches(uid() + '__olymp-(0[1-9]|1[0-5])'));
+   allow list: if owner(s) || (olympiadOpen(s) && resource.data.__ownerId == uid());
+   allow create: if valid() && created() && (owner(s) || (olympiadOpen(s) && mine(s,request.resource.data) && request.resource.data.submissions <= 1));
+   allow update: if valid() && (owner(s) || (olympiadOpen(s) && mine(s,request.resource.data) && immutableOwner()
+    && request.resource.data.__createdAt == resource.data.__createdAt
+    && request.resource.data.submissions >= resource.data.submissions && request.resource.data.submissions <= resource.data.submissions + 1
+    && (resource.data.solved == false || request.resource.data.solved == true)));
+   allow delete: if owner(s);
+  }
   match /schools/{s}/TeacherProfiles/{id} {
    allow get: if owner(s) && id == request.auth.uid;
    allow create, update: if owner(s) && id == request.auth.uid && request.resource.data.id == id
@@ -341,4 +372,5 @@ service cloud.firestore {
   }
  }
 }
+
 
