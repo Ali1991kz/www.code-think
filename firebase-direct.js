@@ -50,7 +50,7 @@
   if(!refreshing)refreshing=request(refreshBase+'?key='+key,'grant_type=refresh_token&refresh_token='+encodeURIComponent(session.refreshToken),null,'POST',true).then(r=>{storeSession(r);return session.idToken;}).catch(e=>{clear();throw e;}).finally(()=>refreshing=null);
   return refreshing;
  }
- function clear(){vault.lock();session=null;identity=null;profile=null;profileDocument=null;pendingAccounts.clear();readCache.clear();sessionStorage.removeItem(SESSION);sessionStorage.removeItem('ct11-token');}
+ function clear(){vault.lock();session=null;identity=null;profile=null;profileDocument=null;communitySyncedAt=0;pendingAccounts.clear();readCache.clear();sessionStorage.removeItem(SESSION);sessionStorage.removeItem('ct11-token');}
  async function fs(path,body,method='POST'){return request(storeBase+path,body,await token(),method);}
  const val=v=>{
   if(v===null)return {nullValue:null};if(typeof v==='boolean')return {booleanValue:v};
@@ -176,8 +176,56 @@
     const t=state.tables.Tasks.find(t=>t.id===p.taskId);if(t){const table=action==='teacherSolution'?'TeacherSolutions':'TaskChecks';const d=await getDoc(path(table,t.sourceKey||t.id),tx);if(d)materials=[decode(d)];}
    }
    const core=window.CT_CORE.create(state.tables,u,p,materials),result=core.run(action);
-   await commit(writesFor(state,core),tx);return result;
+   await commit(writesFor(state,core),tx);
+   if(profile.role==='teacher'&&['gradeTask','gradeCorrection','gradeTransfer','enrollStudent','updateStudent'].includes(action))await syncCommunityScores(true).catch(()=>{communitySyncedAt=0;});
+   return result;
   }catch(e){throw e;}
+ }
+
+ // Only a teacher publishes XP. Student heartbeats never contain a score.
+ let communitySyncedAt=0;
+ const communityTables=['Users','ClassStudents','Tasks','Assignments','TaskAttempts','Corrections','TransferProbes'];
+ async function syncCommunityScores(force=false){
+  if(profile.role!=='teacher'||(!force&&Date.now()-communitySyncedAt<300000))return;
+  // Read projection versions BEFORE source data: a concurrent publication fails
+  // its compare-and-set instead of overwriting a newer teacher's result.
+  const [existing,present]=await Promise.all([queryDocuments('CommunityScores'),queryDocuments('Presence')]);
+  const old=new Map(existing.map(d=>[decode(d).userId,d]));
+  const state=await load(communityTables,{optimistic:true});
+  const scores=window.CT_COMMUNITY_MODEL.scores(state.tables,window.CT_PROFILE.compute),remaining=new Set(),writes=[];
+  for(const score of scores){
+   remaining.add(score.userId);const prior=old.get(score.userId),row=prior&&decode(prior);
+   if(row&&['userId','name','classId','xp'].every(k=>row[k]===score[k]))continue;
+   writes.push({update:{name:path('CommunityScores',score.userId),fields:Object.fromEntries(Object.entries(score).map(([k,v])=>[k,val(v)]))},currentDocument:prior?{updateTime:prior.updateTime}:{exists:false},updateTransforms:[{fieldPath:'updatedAt',setToServerValue:'REQUEST_TIME'}]});
+  }
+  for(const [id,doc] of old)if(!remaining.has(id))writes.push({delete:doc.name,currentDocument:{updateTime:doc.updateTime}});
+  const allowed=new Map(scores.map(r=>[r.userId,r]));
+  for(const doc of present){const p=decode(doc),row=allowed.get(p.userId);if(p.role==='student'&&(!row||row.classId!==p.classId||row.name!==p.name))writes.push({delete:doc.name,currentDocument:{updateTime:doc.updateTime}});}
+  // Each score validates User/enrollment/tombstone; stay below the Rules
+  // per-commit document access budget as well as Firestore's write limit.
+  for(let i=0;i<writes.length;i+=4)await fs(root+':commit',{writes:writes.slice(i,i+4)});
+  communitySyncedAt=Date.now();
+ }
+ async function communityWorkspace(){
+  const teacher=profile.role==='teacher';
+  const enrollment=teacher?null:await getDoc(path('ClassStudents',profile.id));
+  const classId=teacher?'__teacher__':enrollment?decode(enrollment).classId:'';
+  const presence={userId:profile.id,name:profile.name,role:profile.role,classId};
+  // One document per account bounds storage, deduplicates tabs, and avoids
+  // marking a still-open second tab offline when the first tab signs out.
+  const pulse=await fs(root+':commit',{writes:[{update:{name:path('Presence',profile.id),fields:Object.fromEntries(Object.entries(presence).map(([k,v])=>[k,val(v)]))},updateTransforms:[{fieldPath:'lastSeen',setToServerValue:'REQUEST_TIME'}]}]});
+  if(teacher)await syncCommunityScores().catch(()=>{});
+  const query=async(table,scope)=>{
+   const q={from:[{collectionId:table}]};
+   if(scope)q.where={fieldFilter:{field:{fieldPath:'classId'},op:scope.length===1?'EQUAL':'IN',value:scope.length===1?val(scope[0]):val(scope)}};
+   return (await fs(root+'/schools/'+identity.schoolId+':runQuery',{structuredQuery:q})).filter(r=>r.document).map(r=>decode(r.document));
+  };
+  const [people,scores]=await Promise.all([query('Presence',teacher?null:classId?[classId,'__teacher__']:['__teacher__']),teacher||classId?query('CommunityScores',teacher?null:[classId]):Promise.resolve([])]);
+  // Use the server's pulse time for expiry even if the device clock is wrong.
+  const now=Date.parse(pulse.writeResults[0].transformResults[0].timestampValue);
+  if(!people.some(p=>p.userId===profile.id))people.push({...presence,lastSeen:new Date(now).toISOString()});
+  const rows=window.CT_COMMUNITY_MODEL.online(people,scores,now);
+  return {rows,serverNow:now};
  }
 
  // Bounded, idempotent active-time pulses. Never used to award grades or XP.
@@ -318,6 +366,7 @@
   const writes=writesFor(state,core);
   for(const {a,userId,user:u}of replacements){writes.push(documentWrite(`${root}/identities/${a.authUid}`,{schoolId:identity.schoolId,userId},null));writes.push(await receiptWrite({userId,login:u.login,temporaryPassword:a.temporaryPassword}));writes.push(await loginRouteWrite(u,a));if(p.requestId)writes.push(documentWrite(path('RegistrationJobs','reset_'+p.requestId+'_'+userId),{userId,operation:'reset'},null));}
   await commit(writes);for(const {a}of replacements)for(const [k,v]of pendingAccounts)if(v===a)pendingAccounts.delete(k);
+  await syncCommunityScores(true).catch(()=>{communitySyncedAt=0;});
   return {updated:users.length,operation:p.operation,credentials};
  }
  async function queryDocuments(table,filters=[],global=false){
@@ -343,7 +392,7 @@
   const [ss,ee,cc]=await Promise.all([queryDocuments('TaskSteps',[['attemptId',id]]),queryDocuments('LearningEvidence',[['attemptId',id]]),queryDocuments('Corrections',[['sourceId',id]])]);
   return {attempt:at,assignment:a,task:td?decode(td):{},student:window.CT_CORE.create({},profile).publicUser(decode(ud)),steps:ss.map(decode),evidence:ee.map(decode),corrections:cc.map(decode).filter(c=>c.userId===at.userId&&c.kind==='task')};
  }
- const purgeTables=['ClassStudents','Attempts','Answers','DiagnosticProfiles','MethodProgress','TaskAttempts','TaskSteps','SkillScores','Events','Corrections','LearningEvidence','TransferProbes','StudentProfiles','RegistrationJobs','TaskTimes'];
+ const purgeTables=['ClassStudents','Attempts','Answers','DiagnosticProfiles','MethodProgress','TaskAttempts','TaskSteps','SkillScores','Events','Corrections','LearningEvidence','TransferProbes','StudentProfiles','RegistrationJobs','TaskTimes','Presence','CommunityScores'];
  async function purgeDocuments(userId){
   const groups=await Promise.all(purgeTables.map(async table=>({table,docs:await queryDocuments(table,[[['Answers','TaskSteps','LearningEvidence'].includes(table)?'__ownerId':'userId',userId]])})));
   for(const table of ['identities','loginRoutes','LoginHandoffs'])groups.push({table,docs:await queryDocuments(table,[['schoolId',identity.schoolId],['userId',userId]],true)});
@@ -511,7 +560,7 @@
 
  async function dispatch(action,p={}){
   if(!project||!key)throw Error('Firebase config.js баптауларын толтырыңыз. / Заполните Firebase config.js.');
-  if(action==='ping')return {version:'11.8.0',backend:'firebase-direct',plan:'Spark',customStudentLogins:true};
+  if(action==='ping')return {version:'11.9.0',backend:'firebase-direct',plan:'Spark',customStudentLogins:true};
   if(action==='logout'){clear();return {loggedOut:true};}
   if(action==='setupTeacher'){const r=await setupTeacher(p);if(!r.needsApproval&&profile?.role==='teacher')await vault.unlock(profile,String(p.password));return r;}
   if(action==='login'){
@@ -535,6 +584,7 @@
   if(action==='teacherProfile')return teacherProfile();
   if(action==='saveTeacherProfile')return saveTeacherProfile(p);
   if(action==='timingWorkspace')return timingWorkspace();
+  if(action==='communityWorkspace')return communityWorkspace();
   if(action==='saveConclusionQuiz')return saveConclusionQuiz(p);
   if(action==='recordTaskTime')return recordTaskTime(p);
   if(action==='teacherReviewWorkspace')return teacherReviewWorkspace(p);
@@ -553,5 +603,6 @@
   }
   return learning(action,p);
  }
- window.CT_FIREBASE={call(action,p={}){const task=queue.then(()=>dispatch(action,p));queue=task.catch(()=>{});return task.catch(e=>{throw friendly(e);});},invalidate:()=>readCache.clear(),status:()=>({signedIn:!!session,project,version:'11.8.0',customStudentLogins:true}),_test:local?{val,plain,rowKey,decode,root}:undefined};
+ window.CT_FIREBASE={call(action,p={}){const task=queue.then(()=>dispatch(action,p));queue=task.catch(()=>{});return task.catch(e=>{throw friendly(e);});},invalidate:()=>readCache.clear(),status:()=>({signedIn:!!session,project,version:'11.9.0',customStudentLogins:true}),_test:local?{val,plain,rowKey,decode,root}:undefined};
 })();
+

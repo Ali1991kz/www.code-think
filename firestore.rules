@@ -142,6 +142,40 @@ service cloud.firestore {
      || (exists(/databases/$(database)/documents/schools/$(s)/StudentProfiles/$(id)) && immutableOwner() && request.resource.data.__createdAt == resource.data.__createdAt));
    allow delete: if owner(s) && existsAfter(/databases/$(database)/documents/schools/$(s)/DeletedPupils/$(id));
   }
+  // Minimal shared data only. Never grant pupils read access to other Users,
+  // attempts, answers, credentials, or private profile documents.
+  function communityClass(s){return get(/databases/$(database)/documents/schools/$(s)/ClassStudents/$(uid())).data.classId;}
+  function communityVisible(s,d){
+   return owner(s) || (student(s) && (d.classId == '__teacher__' || d.classId == communityClass(s)));
+  }
+  match /schools/{s}/Presence/{id} {
+   function valid(){
+    let d=request.resource.data;
+    return (owner(s) || student(s)) && id == uid() && d.userId == uid()
+     && d.name == person(s).name && d.role == person(s).role
+     && ((owner(s) && d.role == 'teacher' && d.classId == '__teacher__')
+      || (student(s) && d.role == 'student' && ((exists(/databases/$(database)/documents/schools/$(s)/ClassStudents/$(uid())) && d.classId == communityClass(s))
+       || (!exists(/databases/$(database)/documents/schools/$(s)/ClassStudents/$(uid())) && d.classId == ''))))
+     && d.keys().hasOnly(['userId','name','role','classId','lastSeen']) && d.lastSeen == request.time;
+   }
+   allow read: if communityVisible(s,resource.data);
+   allow create, update: if valid();
+   allow delete: if owner(s);
+  }
+  match /schools/{s}/CommunityScores/{id} {
+   function valid(){
+    let d=request.resource.data;
+    let u=get(/databases/$(database)/documents/schools/$(s)/Users/$(id)).data;
+    return owner(s) && d.userId == id && u.role == 'student' && u.active == true
+     && !exists(/databases/$(database)/documents/schools/$(s)/DeletedPupils/$(id))
+     && d.name == u.name && d.classId == get(/databases/$(database)/documents/schools/$(s)/ClassStudents/$(id)).data.classId
+     && d.xp is int && d.xp >= 0 && d.updatedAt == request.time
+     && d.keys().hasOnly(['userId','name','classId','xp','updatedAt']);
+   }
+   allow read: if communityVisible(s,resource.data);
+   allow create, update: if valid();
+   allow delete: if owner(s);
+  }
   match /schools/{s}/TeacherProfiles/{id} {
    allow get: if owner(s) && id == request.auth.uid;
    allow create, update: if owner(s) && id == request.auth.uid && request.resource.data.id == id
@@ -307,3 +341,4 @@ service cloud.firestore {
   }
  }
 }
+
