@@ -1,8 +1,22 @@
-# CODE THINK 12.0.0
+# CODE THINK 12.1.0
 
 Static Python learning platform: 31 tasks, grades 7–8 (19/12), Kazakh and Russian.
 GitHub Pages hosts the site. Firebase Auth and Firestore store accounts/progress.
 Firebase Spark remains supported; no Apps Script, Cloud Functions or paid upgrade.
+
+## 12.1 debugging laboratory
+
+Eight bilingual logical-error exercises (four per grade) unlock after the initial
+diagnostic is submitted. Pupils propose a failing input and expected output,
+compare the buggy program with the correct result, explain the error, then repair
+and run Python against their example plus additional cases. Teachers can preview
+both grades and inspect saved evidence. Practice records remain separate from
+grades and XP. Publish the updated Firestore Rules before saving lab work.
+See [setup and teacher guide](UPDATE_12_1_KK.md).
+
+Validation: `node --test tests/debug-lab.test.cjs tests/debug-lab-api.test.cjs`.
+Tests use real CPython for program outputs and mocked browser/API environments;
+they do not substitute for browser/Pyodide or Firestore emulator verification.
 
 ## 12.0 olympiad preparation
 

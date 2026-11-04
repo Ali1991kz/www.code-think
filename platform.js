@@ -752,7 +752,25 @@
     await openDiagnosticBeforeIntro('baseline');
   };
 
+  // 12.1: counterexample-first debugging practice after the baseline is submitted.
+  const navBeforeDebugLab=nav;
+  nav=function(){return navBeforeDebugLab().replace('</nav>',action('page',t('Қатені әшкереле','Поиск ошибок'),page==='debug-lab'?'active':'','data-page="debug-lab"')+'</nav>');};
+  const studentBeforeDebugLab=studentView;
+  studentView=function(){return page==='debug-lab'?nav()+window.CT_DEBUG_LAB.html():studentBeforeDebugLab();};
+  const teacherBeforeDebugLab=teacherView;
+  teacherView=function(){let html=teacherBeforeDebugLab();html=html.replace('</nav>',action('teacher-tab',t('Қатені әшкереле','Поиск ошибок'),teacherTab==='debug-lab'?'active':'','data-tab="debug-lab"')+'</nav>');return teacherTab==='debug-lab'?html.slice(0,html.indexOf('</nav>')+6)+window.CT_DEBUG_LAB.html():html;};
+  const debugLabContext=()=>({user,lang,api});
+  const pageBeforeDebugLab=actions.page;
+  actions.page=async b=>{window.CT_DEBUG_LAB.leave();await pageBeforeDebugLab(b);if(page==='debug-lab')await window.CT_DEBUG_LAB.load(debugLabContext());};
+  const tabBeforeDebugLab=actions['teacher-tab'];
+  actions['teacher-tab']=async b=>{window.CT_DEBUG_LAB.leave();await tabBeforeDebugLab(b);if(teacherTab==='debug-lab')await window.CT_DEBUG_LAB.load(debugLabContext());};
+  const refreshBeforeDebugLab=actions.refresh;
+  actions.refresh=async b=>{await refreshBeforeDebugLab(b);if(page==='debug-lab'||(user?.role==='teacher'&&teacherTab==='debug-lab'))await window.CT_DEBUG_LAB.load(debugLabContext());};
+  const renderBeforeDebugLab=render;
+  render=function(){window.CT_DEBUG_LAB.context(debugLabContext());if(!(page==='debug-lab'||(user?.role==='teacher'&&teacherTab==='debug-lab')))window.CT_DEBUG_LAB.leave();renderBeforeDebugLab();};
+
   boot();
 })();
+
 
 
