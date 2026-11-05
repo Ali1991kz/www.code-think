@@ -3,7 +3,7 @@
  */
 (() => {
  'use strict';
- let user=null,lang='kk',timer=null,epoch=0,inflight=false,rows=[],failed=false,paused=false,clockOffset=0;
+ let user=null,lang='kk',timer=null,epoch=0,inflight=false,rows=[],failed=false,paused=false,clockOffset=0,retryAt=0,failures=0,failureCode='';
  const model=window.CT_COMMUNITY_MODEL,t=(kk,ru)=>lang==='ru'?ru:kk;
  const bar=document.createElement('section');bar.className='community-bar';bar.hidden=true;
  bar.innerHTML='<div class="community-summary"><span class="community-dot" aria-hidden="true"></span><span data-community-count></span></div><div class="community-viewport" tabindex="0"><div class="community-track"></div></div><button class="community-toggle" type="button"></button>';
@@ -22,7 +22,7 @@
   toggle.disabled=false;toggle.textContent=paused?'▶':'Ⅱ';toggle.setAttribute('aria-pressed',String(paused));toggle.setAttribute('aria-label',paused?t('Қозғалысты жалғастыру','Продолжить движение'):t('Қозғалысты тоқтату','Приостановить движение'));
   toggle.hidden=failed||!list.length;
   const group=document.createElement('div');group.className='community-group';
-  if(failed||!list.length){const message=document.createElement('span');message.className='community-message';message.textContent=failed?(user.role==='teacher'?t('Онлайн тізім қолжетімсіз. Жаңартылған Firestore ережелерін жариялап, бетті жаңартыңыз.','Список недоступен. Опубликуйте обновлённые правила Firestore и обновите страницу.'):t('Онлайн тізім уақытша қолжетімсіз','Список онлайн временно недоступен')):t('Қатысушылар тізімі жаңартылуда…','Список участников обновляется…');group.append(message);}
+  if(failed||!list.length){const message=document.createElement('span');message.className='community-message';message.textContent=failed?(failureCode==='RESOURCE_EXHAUSTED'?t('Онлайн жаңарту сұрау шегіне байланысты кідіртілді','Обновление онлайн приостановлено из-за лимита запросов'):failureCode==='PERMISSION_DENIED'&&user.role==='teacher'?t('Онлайн тізімге рұқсат жоқ. Firestore ережелерін тексеріңіз.','Нет доступа к списку онлайн. Проверьте правила Firestore.'):t('Онлайн тізім уақытша қолжетімсіз','Список онлайн временно недоступен')):t('Қатысушылар тізімі жаңартылуда…','Список участников обновляется…');group.append(message);}
   for(const row of list){
    const item=document.createElement('span');item.className='community-person';
    const name=document.createElement('span');name.textContent=(row.role==='teacher'?'👩‍🏫 ':'🟢 ')+row.name;
@@ -35,15 +35,16 @@
  }
  async function poll(){
   if(!user||document.hidden||inflight)return;
+  if(retryAt>Date.now()){clearTimeout(timer);timer=setTimeout(poll,Math.min(retryAt-Date.now(),2147483647));return;}
   const version=epoch;inflight=true;
-  try{const result=await window.CT_FIREBASE.call('communityWorkspace');if(version!==epoch)return;rows=result.rows;clockOffset=result.serverNow-Date.now();failed=false;}
-  catch{if(version!==epoch)return;rows=[];failed=true;}
-  finally{inflight=false;if(version===epoch){paint();clearTimeout(timer);timer=setTimeout(poll,60000);}else if(user)poll();}
+  try{const result=await window.CT_FIREBASE.call('communityWorkspace');if(version!==epoch)return;rows=result.rows;clockOffset=result.serverNow-Date.now();failed=false;retryAt=0;failures=0;failureCode='';}
+  catch(e){if(version!==epoch)return;rows=[];failed=true;failureCode=e.code||'';failures++;retryAt=Math.max(Number(e.retryAt)||0,Date.now()+Math.min(900000,60000*2**Math.min(failures-1,4)));}
+  finally{inflight=false;if(version===epoch){paint();clearTimeout(timer);timer=setTimeout(poll,Math.min(Math.max(60000,retryAt-Date.now()),2147483647));}else if(user)poll();}
  }
  function setUser(next,nextLang){
   const changed=user?.id!==next?.id||user?.role!==next?.role;
   lang=nextLang||'kk';user=next&&!next.mustChangePassword?next:null;
-  if(changed||!user){epoch++;clearTimeout(timer);rows=[];failed=false;paused=false;}
+  if(changed||!user){epoch++;clearTimeout(timer);rows=[];failed=false;paused=false;retryAt=0;failures=0;failureCode='';}
   paint();if(user&&changed)poll();
  }
  document.addEventListener('visibilitychange',()=>{clearTimeout(timer);if(!document.hidden)poll();});

@@ -16,6 +16,30 @@
  const pendingAccounts=new Map(); // Only AES-GCM receipts are persisted in Firestore.
  const vault=window.CT_CREDENTIAL_VAULT;
  const readCache=new Map();
+ const quotaKey='ct-firebase-limits:'+project;
+ let quotaLimits={};
+ try{quotaLimits=JSON.parse(sessionStorage.getItem(quotaKey)||'{}');}catch{}
+ if(!quotaLimits||typeof quotaLimits!=='object'||Array.isArray(quotaLimits))quotaLimits={};
+ function quotaScope(url){return url.startsWith(storeBase)?'firestore':'auth';}
+ function nextQuotaReset(){
+  const fmt=new Intl.DateTimeFormat('en-US',{timeZone:'America/Los_Angeles',year:'numeric',month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit',second:'2-digit',hourCycle:'h23'});
+  const parts=ms=>Object.fromEntries(fmt.formatToParts(new Date(ms)).filter(p=>p.type!=='literal').map(p=>[p.type,Number(p.value)]));
+  const p=parts(Date.now()),target=Date.UTC(p.year,p.month-1,p.day+1);let guess=target+8*3600000;
+  for(let i=0;i<3;i++){const q=parts(guess);guess+=target-Date.UTC(q.year,q.month-1,q.day,q.hour,q.minute,q.second);}
+  return guess+60000;
+ }
+ function limitError(limit){const e=Error('RESOURCE_EXHAUSTED');e.code='RESOURCE_EXHAUSTED';e.status=429;e.quotaKind=limit.kind;e.retryAt=limit.until;return e;}
+ function rememberLimit(url,error,response){
+  const detail=JSON.stringify(error),kind=/daily|per[ _-]?day|per project per day/i.test(detail)?'daily':/per[ _-]?minute|per[ _-]?second|rate.?limit/i.test(detail)?'rate':'unknown';
+  const retry=error.details?.find(d=>String(d['@type']).endsWith('RetryInfo'))?.retryDelay;
+  const delay=typeof retry==='string'?parseFloat(retry)*1000:Number(retry?.seconds||0)*1000+Number(retry?.nanos||0)/1e6;
+  const header=response.headers?.get?.('retry-after'),headerDelay=header?(/^\d+$/.test(header)?Number(header)*1000:Date.parse(header)-Date.now()):0;
+  const until=kind==='daily'?nextQuotaReset():Date.now()+Math.max(60000,delay||0,headerDelay||0);
+  const scope=quotaScope(url),prior=quotaLimits[scope];quotaLimits[scope]={kind,until:Math.max(until,Number(prior?.until)||0)};
+  try{sessionStorage.setItem(quotaKey,JSON.stringify(quotaLimits));}catch{}
+  return limitError(quotaLimits[scope]);
+ }
+ function invalidateTables(tables){for(const key of readCache.keys())if(tables.has(key.split('|')[1]))readCache.delete(key);}
  try{session=JSON.parse(sessionStorage.getItem(SESSION)||'null');}catch{sessionStorage.removeItem(SESSION);}
  // Emulator settings are accepted on loopback only, never on a deployed site.
  const local=['127.0.0.1','localhost','[::1]'].includes(location.hostname);
@@ -29,17 +53,18 @@
   EMAIL_EXISTS:'Бұл логин тіркелген. / Этот логин уже зарегистрирован.',OPERATION_NOT_ALLOWED:'Firebase → Authentication → Email/Password әдісін қосыңыз. / Включите Email/Password в Firebase Authentication.',
   TOO_MANY_ATTEMPTS_TRY_LATER:'Кіру әрекеті тым көп. Кейінірек қайталаңыз. / Слишком много попыток. Повторите позже.',
   PERMISSION_DENIED:'Рұқсат жоқ. Аккаунтты және Firestore Rules баптауын тексеріңіз. / Нет доступа. Проверьте аккаунт и Firestore Rules.',
-  RESOURCE_EXHAUSTED:'Firebase тегін лимиті уақытша аяқталды. Кейінірек қайталаңыз. / Бесплатный лимит Firebase временно исчерпан. Повторите позже.',
+  RESOURCE_EXHAUSTED:'Firebase сұрауларды уақытша шектеді. Жауабыңызды көшіріп сақтап, сәл кейін қайталаңыз. / Firebase временно ограничил запросы. Скопируйте ответ и повторите позже.',
   ABORTED:'Деректер басқа терезеде өзгерді. Бетті жаңартып қайталаңыз. / Данные изменились в другом окне. Обновите страницу и повторите.',
   FAILED_PRECONDITION:'Деректер өзгерді. Бетті жаңартып қайталаңыз. / Данные изменились. Обновите страницу и повторите.'
  };
- function friendly(e){const raw=String(e?.message||e||'');const code=e?.code||raw.split(' : ')[0].split(':')[0];const error=Error(messages[code]||raw);error.code=code;return error;}
+ function friendly(e){const raw=String(e?.message||e||'');const code=e?.code||raw.split(' : ')[0].split(':')[0];const message=code==='RESOURCE_EXHAUSTED'&&e.quotaKind==='daily'?'Firestore тәуліктік сұрау шегіне жетті. Лимит жаңарғанша жауабыңызды бөлек сақтаңыз. / Достигнут суточный лимит Firestore. До сброса лимита сохраните ответ отдельно.':messages[code]||raw;const error=Error(message);error.code=code;error.status=e?.status;error.retryAt=e?.retryAt;error.quotaKind=e?.quotaKind;return error;}
  async function request(url,body,token,method='POST',form=false){
+  const limit=quotaLimits[quotaScope(url)];if(limit?.until>Date.now())throw limitError(limit);
   const ctl=new AbortController(),timer=setTimeout(()=>ctl.abort(),45000);
   try{
    const headers={};if(body!==undefined)headers['Content-Type']=form?'application/x-www-form-urlencoded':'application/json';if(token)headers.Authorization='Bearer '+token;
    const r=await fetch(url,{method,headers,body:body===undefined?undefined:form?body:JSON.stringify(body),signal:ctl.signal});
-   const result=await r.json();if(!r.ok){const err=Error(result.error?.message||result.error?.status||'HTTP '+r.status);err.code=result.error?.status||result.error?.message;err.status=r.status;throw err;}return result;
+   const result=await r.json();if(!r.ok){if(r.status===429||result.error?.status==='RESOURCE_EXHAUSTED')throw rememberLimit(url,result.error||{},r);const err=Error(result.error?.message||result.error?.status||'HTTP '+r.status);err.code=result.error?.status||result.error?.message;err.status=r.status;throw err;}return result;
   }catch(e){if(e.name==='AbortError')throw Error('Байланыс уақыты аяқталды. Сақталғанын тексеріп, қайталаңыз. / Время ожидания истекло. Проверьте сохранение и повторите.');throw e;}finally{clearTimeout(timer);}
  }
  const auth=(action,body)=>request(authBase+'accounts:'+action+'?key='+key,body);
@@ -81,7 +106,8 @@
   const taskActions=new Set(['startTaskAttempt','saveTaskCode','saveTaskStep','submitTask','saveLearningEvidence','startPrediction','completePrediction','startTransfer']);
   let target=profile.role==='student'&&taskActions.has(action)&&action!=='startTaskAttempt'?p.attemptId||'':'';
   if(profile.role==='student'&&action==='completePrediction'&&p.id){const evidence=await getDoc(path('LearningEvidence',p.id),tx);target=evidence?decode(evidence).attemptId:'';}
-  await Promise.all([...new Set(names)].map(async table=>{
+  const requested=[...new Set(names)];
+  for(let i=0;i<requested.length;i+=4)await Promise.all(requested.slice(i,i+4).map(async table=>{
    if(EMPTY.has(table)||(profile.role!=='teacher'&&['PedagogyReviews','RegistrationJobs','TeacherSolutions'].includes(table))){tables[table]=[];return;}
    let docs;
    if(table==='Users'&&profile.role!=='teacher'){tables[table]=[copy(profile)];return;}
@@ -95,13 +121,13 @@
     }
     if(filters.length)structuredQuery.where=filters.length===1?filters[0]:{compositeFilter:{op:'AND',filters}};
     const cacheKey=identity.schoolId+'|'+table+'|'+JSON.stringify(structuredQuery.where||{});
-    const canCache=!tx&&((profile.role==='student'&&SHARED.has(table)&&table!=='Settings')||(profile.role==='teacher'&&readOnly.has(action)));
+    const canCache=!tx&&(readOnly.has(action)||(SHARED.has(table)&&table!=='Settings'));
     const hit=canCache&&readCache.get(cacheKey);
     if(hit&&hit.expiresAt>Date.now()){docs=copy(hit.docs);}
     else{
     const body={structuredQuery};
     const rows=await fs(`${root}/schools/${identity.schoolId}:runQuery`,body);docs=rows.filter(r=>r.document).map(r=>r.document);
-    if(canCache)readCache.set(cacheKey,{docs:copy(docs),expiresAt:Date.now()+30000});
+    if(canCache)readCache.set(cacheKey,{docs:copy(docs),expiresAt:Date.now()+(SHARED.has(table)&&table!=='Settings'?300000:30000)});
     }
    }
    tables[table]=docs.map(d=>{documents.set(d.name,d);return decode(d);});
@@ -155,7 +181,8 @@
    batch.push({update:{name:guard.name,fields:copy(guard.fields)},currentDocument:{updateTime:guard.updateTime},updateTransforms:[{fieldPath:'__updatedAt',setToServerValue:'REQUEST_TIME'}]});
   }
   if(batch.length>400)throw Error('Жазбалар көп. Әрекетті кішірек топпен қайталаңыз. / Слишком много записей. Повторите меньшей группой.');
-  const result=await fs(root+':commit',{writes:batch});readCache.clear();
+  const result=await fs(root+':commit',{writes:batch});
+  invalidateTables(new Set(batch.map(w=>(w.update?.name||w.delete||'').split('/').at(-2))));
   const name=identity&&profile?path('Users',profile.id):null,index=batch.findIndex(w=>w.update?.name===name);
   if(index>=0){
    const write=batch[index],saved=result.writeResults[index];
@@ -164,7 +191,7 @@
    profile=decode(profileDocument);
   }
  }
- const readOnly=new Set(['schoolWorkspace','me','teacherDashboard','studentWorkspace','pedagogyWorkspace','correctionWorkspace','teacherSolution','getTaskTests','checkTaskOutputs']);
+ const readOnly=new Set(['schoolWorkspace','me','teacherDashboard','teacherWorkspace','studentWorkspace','pedagogyWorkspace','correctionWorkspace','teacherSolution','getTaskTests','checkTaskOutputs']);
  async function learning(action,p){
   const names=window.CT_CORE.dependencies[action];if(!names)throw Error('Әрекет табылмады. / Действие не найдено.');
   let tx;
@@ -302,6 +329,7 @@
   // Each score validates User/enrollment/tombstone; stay below the Rules
   // per-commit document access budget as well as Firestore's write limit.
   for(let i=0;i<writes.length;i+=4)await fs(root+':commit',{writes:writes.slice(i,i+4)});
+  if(writes.length)invalidateTables(new Set(['CommunityScores']));
   communitySyncedAt=Date.now();
  }
  // Public-to-class projection only: no credentials, answers or private goals.
@@ -344,14 +372,17 @@
   // One document per account bounds storage, deduplicates tabs, and avoids
   // marking a still-open second tab offline when the first tab signs out.
   const pulse=await fs(root+':commit',{writes:[{update:{name:path('Presence',profile.id),fields:Object.fromEntries(Object.entries(presence).map(([k,v])=>[k,val(v)]))},updateTransforms:[{fieldPath:'lastSeen',setToServerValue:'REQUEST_TIME'}]}]});
-  if(teacher)await syncCommunityScores().catch(()=>{});
-  if(teacher)await syncRankingScores().catch(()=>{rankingSyncedAt=0;});
+  // Bootstrap online XP once. Grades/enrollment already publish fresh scores;
+  // a heartbeat must not rescan the entire school's learning history.
+  if(teacher&&!communitySyncedAt)await syncCommunityScores().catch(()=>{});
   const query=async(table,scope)=>{
    const q={from:[{collectionId:table}]};
    if(scope)q.where={fieldFilter:{field:{fieldPath:'classId'},op:scope.length===1?'EQUAL':'IN',value:scope.length===1?val(scope[0]):val(scope)}};
    return (await fs(root+'/schools/'+identity.schoolId+':runQuery',{structuredQuery:q})).filter(r=>r.document).map(r=>decode(r.document));
   };
-  const [people,scores]=await Promise.all([query('Presence',teacher?null:classId?[classId,'__teacher__']:['__teacher__']),teacher||classId?query('CommunityScores',teacher?null:[classId]):Promise.resolve([])]);
+  const scoreKey=identity.schoolId+'|CommunityScores|'+(teacher?'teacher':classId),cached=readCache.get(scoreKey);
+  const scoreRows=async()=>{if(cached?.expiresAt>Date.now())return copy(cached.docs);const docs=teacher||classId?await query('CommunityScores',teacher?null:[classId]):[];readCache.set(scoreKey,{docs:copy(docs),expiresAt:Date.now()+300000});return docs;};
+  const [people,scores]=await Promise.all([query('Presence',teacher?null:classId?[classId,'__teacher__']:['__teacher__']),scoreRows()]);
   // Use the server's pulse time for expiry even if the device clock is wrong.
   const now=Date.parse(pulse.writeResults[0].transformResults[0].timestampValue);
   if(!people.some(p=>p.userId===profile.id))people.push({...presence,lastSeen:new Date(now).toISOString()});
@@ -692,7 +723,7 @@
 
  async function dispatch(action,p={}){
   if(!project||!key)throw Error('Firebase config.js баптауларын толтырыңыз. / Заполните Firebase config.js.');
-  if(action==='ping')return {version:'12.2.1',backend:'firebase-direct',plan:'Spark',customStudentLogins:true};
+  if(action==='ping')return {version:'12.2.2',backend:'firebase-direct',plan:'Spark',customStudentLogins:true};
   if(action==='logout'){clear();return {loggedOut:true};}
   if(action==='setupTeacher'){const r=await setupTeacher(p);if(!r.needsApproval&&profile?.role==='teacher')await vault.unlock(profile,String(p.password));return r;}
   if(action==='login'){
@@ -742,7 +773,7 @@
   }
   return learning(action,p);
  }
- window.CT_FIREBASE={call(action,p={}){const task=queue.then(()=>dispatch(action,p));queue=task.catch(()=>{});return task.catch(e=>{throw friendly(e);});},invalidate:()=>readCache.clear(),status:()=>({signedIn:!!session,project,version:'12.2.1',customStudentLogins:true}),_test:local?{val,plain,rowKey,decode,root}:undefined};
+ window.CT_FIREBASE={call(action,p={}){const task=queue.then(()=>dispatch(action,p));queue=task.catch(()=>{});return task.catch(e=>{throw friendly(e);});},invalidate:()=>readCache.clear(),status:()=>({signedIn:!!session,project,version:'12.2.2',customStudentLogins:true}),_test:local?{val,plain,rowKey,decode,root}:undefined};
 })();
 
 
