@@ -676,7 +676,12 @@
   const core=window.CT_CORE.create(state.tables,profile);
   const result=teacher?{dashboard:core.run('teacherDashboard'),teacherWS:core.run('teacherWorkspace'),corrections:core.run('correctionWorkspace')}:{mine:core.run('me'),workspace:core.run('studentWorkspace'),corrections:core.run('correctionWorkspace')};
   result.ped=(names.includes('LearningEvidence')||names.includes('TransferProbes'))?core.run('pedagogyWorkspace'):{evidence:[],probes:[],reviews:[]};
-  await commit(writesFor(state,core));if(!teacher)result.studentProfile=await studentProfile();else result.teacherProfile=await teacherProfile();if(teacher&&view==='students'){result.temporaryPasswords=await temporaryPasswords(state.tables.Users);result.purgeJobs=(await queryDocuments('PurgeJobs',[['status','deleting']])).map(decode);}result.timings=await timingWorkspace();return result;
+  await commit(writesFor(state,core));
+  // These reads are independent; keep them within the four-request read budget.
+  const [preferences,timings]=await Promise.all([teacher?teacherProfile():studentProfile(),timingWorkspace()]);
+  if(teacher)result.teacherProfile=preferences;else result.studentProfile=preferences;
+  result.timings=timings;
+  if(teacher&&view==='students'){result.temporaryPasswords=await temporaryPasswords(state.tables.Users);result.purgeJobs=(await queryDocuments('PurgeJobs',[['status','deleting']])).map(decode);}return result;
  }
  const backupTables=[...Object.keys(window.CT_CORE.schemas).filter(n=>n!=='Sessions'),'TeacherSolutions','TaskChecks','TaskTimes','OlympiadAccess','OlympiadWork','DebugLabWork'];
  async function exportBackup(){
@@ -736,7 +741,9 @@
   }
   await current();
   if(teacherOnly.has(action)&&profile.role!=='teacher')throw Error('Мұғалім құқығы қажет. / Нужны права учителя.');
-  if(profile.mustChangePassword&&!['me','changePassword'].includes(action))throw Error('Алдымен уақытша құпиясөзді ауыстырыңыз. / Сначала смените временный пароль.');
+  if(profile.mustChangePassword&&!['me','sessionUser','changePassword'].includes(action))throw Error('Алдымен уақытша құпиясөзді ауыстырыңыз. / Сначала смените временный пароль.');
+  // Restoring a session needs the validated user, not the full learning history.
+  if(action==='sessionUser')return {user:window.CT_CORE.create({},profile).publicUser(profile)};
   if(action==='unlockTemporaryPasswords'){const r=await auth('signInWithPassword',{email:alias(profile.login),password:String(p.password||''),returnSecureToken:true});if(r.localId!==session.uid)throw Error('Аккаунт сәйкес емес. / Аккаунт не совпадает.');await vault.unlock(profile,String(p.password));return temporaryPasswords();}
   if(action==='getTemporaryPasswords')return temporaryPasswords();
   if(action==='schoolWorkspace')return schoolWorkspace(p);
@@ -775,6 +782,3 @@
  }
  window.CT_FIREBASE={call(action,p={}){const task=queue.then(()=>dispatch(action,p));queue=task.catch(()=>{});return task.catch(e=>{throw friendly(e);});},invalidate:()=>readCache.clear(),status:()=>({signedIn:!!session,project,version:'12.2.2',customStudentLogins:true}),_test:local?{val,plain,rowKey,decode,root}:undefined};
 })();
-
-
-
