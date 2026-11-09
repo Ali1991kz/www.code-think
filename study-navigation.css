@@ -1,0 +1,11 @@
+.study-main-nav{margin-top:12px;gap:8px}
+.study-main-nav button{font-weight:600;min-height:44px}
+.study-subnav{padding:10px;background:var(--surface);border:1px solid var(--border);border-radius:16px;margin-top:-8px;gap:8px}
+.study-subnav button{min-height:44px}
+.study-breadcrumb{display:flex;flex-wrap:wrap;align-items:center;gap:12px;margin:0 0 22px;color:var(--muted)}
+.study-breadcrumb button{min-height:44px}
+.study-achievements-link{margin:18px 0}
+.study-transfer{margin-top:24px}
+.study-diagnostics .grid2>article{padding:22px;border:1px solid var(--border);border-radius:16px;background:var(--surface2)}
+.study-main-nav button:focus-visible,.study-subnav button:focus-visible{outline:3px solid var(--primary);outline-offset:3px}
+@media(max-width:600px){.study-main-nav{display:grid;grid-template-columns:repeat(2,minmax(0,1fr))}.study-main-nav button{font-size:14px;white-space:normal;text-align:left;padding:12px}.study-main-nav button:last-child{grid-column:1/-1}.study-subnav{display:grid;grid-template-columns:1fr}.study-subnav button{text-align:left;font-size:14px}.study-diagnostics .grid2>article{padding:16px}}

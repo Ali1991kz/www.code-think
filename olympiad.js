@@ -43,7 +43,7 @@
   catch(e){if(version===epoch){data=null;error=e.message;}}
  }
  function html(){
-  const heading=`<div class="section-head"><div><span class="eyebrow">PYTHON · 8 ${t('СЫНЫП','КЛАСС')}</span><h1>${t('Олимпиадаға дайындық','Подготовка к олимпиаде')}</h1></div>${button('reload',t('Жаңарту','Обновить'),'','quiet')}</div>`;
+  const heading=`<div class="section-head"><div><span class="eyebrow">PYTHON · 8 ${t('СЫНЫП','КЛАСС')}</span><h1>${isTeacher()?t('Олимпиадаға дайындық','Подготовка к олимпиаде'):t('Күрделі есептер','Сложные задачи')}</h1></div>${button('reload',t('Жаңарту','Обновить'),'','quiet')}</div>`;
   let inner='';
   if(error)inner=`<article class="card"><h2>${t('Бөлім әзірге қолжетімсіз','Раздел пока недоступен')}</h2><p>${esc(error)}</p>${isTeacher()?`<p>${t('Жаңартылған firestore.rules файлын Firebase Rules бөлімінде жариялап, қайта жаңартыңыз.','Опубликуйте обновлённый firestore.rules в Firebase Rules и обновите страницу.')}</p>`:''}</article>`;
   else if(!data)inner=`<p>${t('Жүктелуде…','Загрузка…')}</p>`;
