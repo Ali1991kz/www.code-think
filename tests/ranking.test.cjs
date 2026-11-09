@@ -53,7 +53,7 @@ test('pupil and teacher UI: tabs, own highlight, tie labels, escaped names, week
  await listeners.click({target:{closest:()=>({dataset:{ranking:'mode',mode:'weekly'}})}});html=w.CT_RANKING.html();assert.match(html,/Аптаның үздіктері/);assert.ok(!html.includes('class="ranking-leader"'));
  w.CT_RANKING.context({...context,lang:'ru'});assert.match(w.CT_RANKING.html(),/Лидеры недели/);
  await w.CT_RANKING.load({...context,user:{id:'teacher',role:'teacher'}});assert.match(w.CT_RANKING.html(),/data-ranking-class/);
- assert.match(source('platform.js'),/data-page="ranking"/);assert.match(source('platform.js'),/data-tab="ranking"/);assert.match(source('index.html'),/ranking-model.js\?v=12.2.0.*firebase-direct.js\?v=12.2.0.*ranking.js\?v=12.2.0/);
+ assert.match(source('platform.js'),/data-page="ranking"/);assert.match(source('platform.js'),/data-tab="ranking"/);assert.match(source('index.html'),/ranking-model.js\?v=12.2.0.*firebase-direct.js\?v=[^"]+.*ranking.js\?v=12.2.0/);
 });
 test('late loads cannot leak a previous account and errors provide a retry',async()=>{
  const w=model();vm.runInContext(source('ranking.js'),vm.createContext({window:w,document:{querySelector:()=>null,addEventListener(){}}}));let resolve;

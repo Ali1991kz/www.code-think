@@ -121,13 +121,16 @@
     }
     if(filters.length)structuredQuery.where=filters.length===1?filters[0]:{compositeFilter:{op:'AND',filters}};
     const cacheKey=identity.schoolId+'|'+table+'|'+JSON.stringify(structuredQuery.where||{});
-    const canCache=!tx&&(readOnly.has(action)||(SHARED.has(table)&&table!=='Settings'));
+    const cacheEligible=readOnly.has(action)||(SHARED.has(table)&&table!=='Settings')||tx?.optimistic===true;
+    const canCache=!tx&&cacheEligible;
     const hit=canCache&&readCache.get(cacheKey);
     if(hit&&hit.expiresAt>Date.now()){docs=copy(hit.docs);}
     else{
     const body={structuredQuery};
     const rows=await fs(`${root}/schools/${identity.schoolId}:runQuery`,body);docs=rows.filter(r=>r.document).map(r=>r.document);
-    if(canCache)readCache.set(cacheKey,{docs:copy(docs),expiresAt:Date.now()+(SHARED.has(table)&&table!=='Settings'?300000:30000)});
+    // Fresh mutation reads can seed the next read-only screen. The commit
+    // invalidates every changed table; mutations themselves never use a cache.
+    if(cacheEligible)readCache.set(cacheKey,{docs:copy(docs),expiresAt:Date.now()+(SHARED.has(table)&&table!=='Settings'?300000:30000)});
     }
    }
    tables[table]=docs.map(d=>{documents.set(d.name,d);return decode(d);});
@@ -204,9 +207,8 @@
    }
    const core=window.CT_CORE.create(state.tables,u,p,materials),result=core.run(action);
    await commit(writesFor(state,core),tx);
-   if(profile.role==='teacher'&&['gradeTask','gradeCorrection','gradeTransfer','enrollStudent','updateStudent'].includes(action))await syncCommunityScores(true).catch(()=>{communitySyncedAt=0;});
-   if(profile.role==='teacher'&&['gradeTask','gradeCorrection','gradeTransfer','enrollStudent','updateStudent'].includes(action))await syncRankingScores(true).catch(()=>{rankingSyncedAt=0;});
-   if(profile.role==='teacher'&&['gradeTask','enrollStudent','updateStudent'].includes(action))await syncOlympiadAccess().catch(()=>{});
+   if(profile.role==='teacher'&&['gradeTask','gradeCorrection','gradeTransfer','enrollStudent','updateStudent'].includes(action))
+    await syncStudentProjections(['gradeTask','enrollStudent','updateStudent'].includes(action));
    return result;
   }catch(e){throw e;}
  }
@@ -242,10 +244,10 @@
  // Practice verdicts never update grades, SkillScores, CommunityScores or XP.
  const olympiadTables=['Users','ClassStudents','Tasks','Assignments','TaskAttempts'];
  const olympiadTask=id=>window.CT_OLYMPIAD_BANK.find(t=>t.id===id);
- async function syncOlympiadAccess(){
+ async function syncOlympiadAccess(snapshot=null){
   requireTeacher();
-  const oldDocs=await queryDocuments('OlympiadAccess'),old=new Map(oldDocs.map(d=>[decode(d).userId,d]));
-  const state=await load(olympiadTables,{optimistic:true}),writes=[];
+  const oldDocs=snapshot?snapshot.olympiadExisting:await queryDocuments('OlympiadAccess'),old=new Map(oldDocs.map(d=>[decode(d).userId,d]));
+  const state=snapshot?snapshot.state:await load(olympiadTables,{optimistic:true}),writes=[];
   for(const u of state.tables.Users.filter(u=>u.role==='student'&&String(u.active)==='true'&&!u.deletedAt)){
    const d=old.get(u.id),prior=d&&decode(d);if(prior?.manual)continue;
    const ready=window.CT_OLYMPIAD_MODEL.readiness(state.tables,u),obj={userId:u.id,...ready,manual:false};
@@ -310,13 +312,13 @@
  let communitySyncedAt=0;
  let rankingSyncedAt=0;
  const communityTables=['Users','ClassStudents','Tasks','Assignments','TaskAttempts','Corrections','TransferProbes'];
- async function syncCommunityScores(force=false){
+ async function syncCommunityScores(force=false,snapshot=null){
   if(profile.role!=='teacher'||(!force&&Date.now()-communitySyncedAt<300000))return;
   // Read projection versions BEFORE source data: a concurrent publication fails
   // its compare-and-set instead of overwriting a newer teacher's result.
-  const [existing,present]=await Promise.all([queryDocuments('CommunityScores'),queryDocuments('Presence')]);
+  const [existing,present]=snapshot?[snapshot.communityExisting,snapshot.present]:await Promise.all([queryDocuments('CommunityScores'),queryDocuments('Presence')]);
   const old=new Map(existing.map(d=>[decode(d).userId,d]));
-  const state=await load(communityTables,{optimistic:true});
+  const state=snapshot?snapshot.state:await load(communityTables,{optimistic:true});
   const scores=window.CT_COMMUNITY_MODEL.scores(state.tables,window.CT_PROFILE.compute),remaining=new Set(),writes=[];
   for(const score of scores){
    remaining.add(score.userId);const prior=old.get(score.userId),row=prior&&decode(prior);
@@ -334,12 +336,12 @@
  }
  // Public-to-class projection only: no credentials, answers or private goals.
  // Read old projection versions before sources so stale publications fail CAS.
- async function syncRankingScores(force=false){
+ async function syncRankingScores(force=false,snapshot=null){
   if(profile.role!=='teacher'||!window.CT_RANKING_MODEL||(!force&&Date.now()-rankingSyncedAt<300000))return;
-  const result=await fs(root+'/schools/'+identity.schoolId+':runQuery',{structuredQuery:{from:[{collectionId:'Rankings'}]}});
+  const result=snapshot?snapshot.rankingResult:await fs(root+'/schools/'+identity.schoolId+':runQuery',{structuredQuery:{from:[{collectionId:'Rankings'}]}});
   const existing=result.filter(r=>r.document).map(r=>r.document),now=result.find(r=>r.readTime)?.readTime||new Date().toISOString();
   const old=new Map(existing.map(d=>[decode(d).userId,d]));
-  const state=await load([...communityTables,'Classes','StudentProfiles'],{optimistic:true});
+  const state=snapshot?snapshot.state:await load([...communityTables,'Classes','StudentProfiles'],{optimistic:true});
   const rows=window.CT_RANKING_MODEL.project(state.tables,window.CT_PROFILE.compute,existing.map(decode),now),remaining=new Set(),writes=[];
   for(const row of rows){
    remaining.add(row.userId);const prior=old.get(row.userId),saved=prior&&decode(prior);
@@ -349,6 +351,33 @@
   for(const [id,doc]of old)if(!remaining.has(id))writes.push({delete:doc.name,currentDocument:{updateTime:doc.updateTime}});
   for(let i=0;i<writes.length;i+=4)await fs(root+':commit',{writes:writes.slice(i,i+4)});
   rankingSyncedAt=Date.now();
+ }
+ // A grade/enrollment change feeds several projections. Capture ALL projection
+ // versions first, then read one fresh source snapshot for this operation only.
+ // Never reuse a source snapshot across mutations or skip compare-and-set guards.
+ async function syncStudentProjections(includeOlympiad=false){
+  requireTeacher();
+  try{
+   const reads=await Promise.allSettled([
+    queryDocuments('CommunityScores'),queryDocuments('Presence'),
+    window.CT_RANKING_MODEL?fs(root+'/schools/'+identity.schoolId+':runQuery',{structuredQuery:{from:[{collectionId:'Rankings'}]}}):Promise.resolve([]),
+    includeOlympiad?queryDocuments('OlympiadAccess'):Promise.resolve([])
+   ]);
+   const ready=i=>reads[i].status==='fulfilled';
+   const communityReady=ready(0)&&ready(1),rankingReady=ready(2)&&!!window.CT_RANKING_MODEL,olympiadReady=includeOlympiad&&ready(3);
+   if(!communityReady)communitySyncedAt=0;if(!rankingReady)rankingSyncedAt=0;
+   if(!communityReady&&!rankingReady&&!olympiadReady)return;
+   const names=[...(communityReady||rankingReady?communityTables:[]),...(rankingReady?['Classes','StudentProfiles']:[]),...(olympiadReady?olympiadTables:[])];
+   const state=await load(names,{optimistic:true});
+   const snapshot={state,communityExisting:reads[0].value,present:reads[1].value,rankingResult:reads[2].value,olympiadExisting:reads[3].value};
+   if(communityReady)await syncCommunityScores(true,snapshot).catch(()=>{communitySyncedAt=0;});
+   if(rankingReady)await syncRankingScores(true,snapshot).catch(()=>{rankingSyncedAt=0;});
+   if(olympiadReady)await syncOlympiadAccess(snapshot).catch(()=>{});
+  }catch{
+   // The pupil/grade commit has already succeeded. Retry projections on their
+   // next workspace load; do not replay the original mutation on a read failure.
+   communitySyncedAt=0;rankingSyncedAt=0;
+  }
  }
  async function rankingWorkspace(){
   const teacher=profile.role==='teacher';let classId='';
@@ -528,8 +557,7 @@
   const writes=writesFor(state,core);
   for(const {a,userId,user:u}of replacements){writes.push(documentWrite(`${root}/identities/${a.authUid}`,{schoolId:identity.schoolId,userId},null));writes.push(await receiptWrite({userId,login:u.login,temporaryPassword:a.temporaryPassword}));writes.push(await loginRouteWrite(u,a));if(p.requestId)writes.push(documentWrite(path('RegistrationJobs','reset_'+p.requestId+'_'+userId),{userId,operation:'reset'},null));}
   await commit(writes);for(const {a}of replacements)for(const [k,v]of pendingAccounts)if(v===a)pendingAccounts.delete(k);
-  await syncCommunityScores(true).catch(()=>{communitySyncedAt=0;});
-  await syncRankingScores(true).catch(()=>{rankingSyncedAt=0;});
+  await syncStudentProjections();
   return {updated:users.length,operation:p.operation,credentials};
  }
  async function queryDocuments(table,filters=[],global=false){
@@ -728,13 +756,13 @@
 
  async function dispatch(action,p={}){
   if(!project||!key)throw Error('Firebase config.js баптауларын толтырыңыз. / Заполните Firebase config.js.');
-  if(action==='ping')return {version:'12.2.2',backend:'firebase-direct',plan:'Spark',customStudentLogins:true};
+  if(action==='ping')return {version:'12.2.3',backend:'firebase-direct',plan:'Spark',customStudentLogins:true};
   if(action==='logout'){clear();return {loggedOut:true};}
   if(action==='setupTeacher'){const r=await setupTeacher(p);if(!r.needsApproval&&profile?.role==='teacher')await vault.unlock(profile,String(p.password));return r;}
   if(action==='login'){
    vault.lock();const authLogin=await resolveLogin(p.login);const r=await auth('signInWithPassword',{email:alias(authLogin),password:String(p.password||''),returnSecureToken:true});storeSession(r);
    try{await current();if(norm(profile.login)!==norm(p.login))throw Error('Логин немесе құпиясөз қате. / Неверный логин или пароль.');if(p.role&&profile.role!==p.role)throw Error('Аккаунт рөлін дұрыс таңдаңыз. / Выберите правильную роль аккаунта.');
-    const name=path('Users',profile.id),old=await getDoc(name),obj=decode(old);obj.lastLoginAt=new Date().toISOString();await commit([documentWrite(name,clean('Users',obj,{}),old)]);
+    const name=path('Users',profile.id),old=profileDocument,obj=decode(old);obj.lastLoginAt=new Date().toISOString();await commit([documentWrite(name,clean('Users',obj,{}),old)]);
     if(profile.role==='teacher')await vault.unlock(profile,String(p.password||''));
     return {token:random(),user:window.CT_CORE.create({},profile).publicUser(profile)};
    }catch(e){clear();throw e;}
@@ -780,5 +808,5 @@
   }
   return learning(action,p);
  }
- window.CT_FIREBASE={call(action,p={}){const task=queue.then(()=>dispatch(action,p));queue=task.catch(()=>{});return task.catch(e=>{throw friendly(e);});},invalidate:()=>readCache.clear(),status:()=>({signedIn:!!session,project,version:'12.2.2',customStudentLogins:true}),_test:local?{val,plain,rowKey,decode,root}:undefined};
+  window.CT_FIREBASE={call(action,p={}){const task=queue.then(()=>dispatch(action,p));queue=task.catch(()=>{});return task.catch(e=>{throw friendly(e);});},invalidate:()=>readCache.clear(),status:()=>({signedIn:!!session,project,version:'12.2.3',customStudentLogins:true}),_test:local?{val,plain,rowKey,decode,root}:undefined};
 })();
