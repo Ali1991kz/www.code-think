@@ -1,0 +1,6 @@
+Blockly 13.4.0
+Source: https://registry.npmjs.org/blockly/-/blockly-13.4.0.tgz
+Repository: https://github.com/RaspberryPiFoundation/blockly
+License: Apache-2.0 (LICENSE)
+Verified npm archive integrity: sha512-cWZJV5nocL+VWOG9Vfm6j8shdOLGyvKkyoGOS2bk9u6PKb4qqLp50NeL8YoNMTEi7fHmY37eBYT1yC6Y7/yZ7w==
+Local scripts, en/ru messages and media copied unmodified. Source maps omitted.

@@ -1,0 +1,44 @@
+{
+  "schema_version": "1.0",
+  "mode": "trainer",
+  "grade": 8,
+  "subject": "Информатика",
+  "topic": "Блоктардан Python алгоритміне: CODE THINK тапсырмалары",
+  "interface_language": "kk",
+  "content_language": "kk",
+  "supported_languages": [
+    "kk",
+    "ru"
+  ],
+  "objective_source": "working",
+  "learning_objectives": [
+    {
+      "id": "working-blocks-to-python",
+      "text": "Оқушы блоктармен алгоритм құрастырады, Python нұсқасын оқиды және кемінде екі кіріспен тексеріп, нәтижесін түсіндіреді."
+    }
+  ],
+  "task_ids": [
+    "blocks-to-python"
+  ],
+  "scoring": "feedback_only",
+  "implementation": "Optional editor inside the existing platform; changes no task assessment policy.",
+  "version": "12.5.0",
+  "browser_checks": [
+    {
+      "status": "checked",
+      "environment": "synthetic local pupil; in-app Chromium; default desktop and 390x844",
+      "evidence": "UPDATE_12_5_0_KK.md"
+    }
+  ],
+  "content_checks": [
+    {
+      "status": "checked",
+      "method": "headless Blockly plus CPython and existing UI regression tests"
+    }
+  ],
+  "limitations": [
+    "No classroom trial",
+    "No automatic Python-to-blocks conversion",
+    "Blocks local only; existing Python and visualization limits remain"
+  ]
+}

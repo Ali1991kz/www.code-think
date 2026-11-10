@@ -1,4 +1,8 @@
-# CODE THINK 12.4.0
+# CODE THINK 12.5.0
+
+## Optional block editor (12.5.0)
+
+Pupils can open **Блоктармен құрастыр / Собери из блоков** in the editable task code phase and Python trainer. Drag-and-connect Blockly blocks produce a live Python preview. Applying code is explicit, replacing nonempty code requires a checkbox, and the previous local code can be restored. Blocks are saved locally per project/account/workspace, with JSON import/export; no added Firebase operations or grading changes. Vendor assets are lazy-loaded and served locally. See [UPDATE_12_5_0_KK.md](UPDATE_12_5_0_KK.md) for usage, checks and limits.
 
 Static Python learning platform: 31 tasks, grades 7–8 (19/12), Kazakh and Russian.
 GitHub Pages hosts the site. Firebase Auth and Firestore store accounts/progress.

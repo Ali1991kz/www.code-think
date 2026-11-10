@@ -15,4 +15,4 @@ http.createServer((req,res)=>{
  const target=fs.existsSync(file)&&fs.statSync(file).isDirectory()?path.join(file,'index.html'):file;
  if(!fs.existsSync(target)){res.writeHead(404);return res.end('Not found');}
  res.setHeader('Content-Type',types[path.extname(target)]||'application/octet-stream');fs.createReadStream(target).pipe(res);
-}).listen(8894,'127.0.0.1',()=>console.log('Synthetic study UI preview: http://127.0.0.1:8894/ (no production Firebase)'));
+}).listen(Number(process.env.CT_PREVIEW_PORT)||8894,'127.0.0.1',()=>console.log('Synthetic study UI preview (no production Firebase)'));

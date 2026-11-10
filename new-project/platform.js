@@ -825,5 +825,57 @@
   };
 
 
+
+  // 12.5: optional local block studio; generated Python uses the existing execution path.
+  function blockEntry(prefix,key,backup){
+   return `<section class="block-entry" aria-label="${t('Программа құрастыру тәсілі','Способ построения программы')}">${action('blocks-open','▦ '+t('Блоктармен құрастыр','Собери из блоков'),'quiet',`data-prefix="${prefix}"`)}<p>${t('Блоктарды жалға → Python кодын қара → қолдан да тексер.','Соедини блоки → посмотри Python → примени и проверь.')}</p>${backup?action('blocks-restore',t('Алдыңғы кодты қайтару','Вернуть предыдущий код'),'quiet',`data-prefix="${prefix}"`):''}</section>`;
+  }
+  const panelBeforeBlocks=codePanel;
+  codePanel=function(at,info,locked=false,prefix='task'){
+   const key=prefix+':'+at.id;
+   return (!locked&&user?.role==='student'?blockEntry(prefix,key,drafts.has(key+':block-backup')):'')+panelBeforeBlocks(at,info,locked,prefix);
+  };
+  const trainingBeforeBlocks=trainingPage;
+  trainingPage=function(){return trainingBeforeBlocks().replace('<label class="field">Python',blockEntry('training','training:'+trainingKey,Object.hasOwn(trainingDraft(),'blockBackup'))+'<label class="field">Python');};
+  function blockContext(prefix){
+   if(user?.role!=='student'||user.mustChangePassword)throw Error(t('Оқушы аккаунтымен кір.','Войди в аккаунт ученика.'));
+   if(prefix==='training'){
+    if(page!=='training')throw Error(t('Python тренажерін аш.','Открой тренажёр Python.'));
+    const task=trainingTask(),info=task?taskInfo(task):null;
+    return {context:'training:'+trainingKey,key:'training:'+trainingKey,code:trainingDraft().code||'',title:info?.title||t('Еркін Python алаңы','Свободная площадка Python'),scenario:info?.scenario||''};
+   }
+   if(prefix!=='task'&&prefix!=='correction')throw Error(t('Код редакторын аш.','Открой редактор кода.'));
+   if(prefix==='task'&&(page!=='task'||active()?.attempt?.status!=='in_progress'||active()?.archived))throw Error(t('Тек орындалып жатқан жұмысты өзгертуге болады.','Изменять можно только работу в процессе.'));
+   if(prefix==='correction'&&(page!=='correction'||correctionItem()?.kind!=='task'))throw Error(t('Түзету жұмысын аш.','Открой работу над ошибками.'));
+   const c=codingContext(prefix),info=taskInfo(c.task);return {...c,context:c.key+':'+(info.sourceKey||c.task.id),title:info.title,scenario:info.scenario};
+  }
+  function applyBlockCode(prefix,context,code,expected,backup=true){
+   const c=blockContext(prefix);
+   if(c.context!==context||String(c.code)!==String(expected))throw Error(t('Код немесе жұмыс өзгерді. Блок редакторын қайта аш.','Код или работа изменились. Открой блоки заново.'));
+   if(typeof code!=='string'||code.length>20000)throw Error(t('Python коды 20 000 таңбадан аспасын.','Код Python не должен превышать 20 000 символов.'));
+   if(prefix==='training'){
+    trainingSaved[trainingKey]={...trainingDraft(),code,...(backup?{blockBackup:c.code}:{})};
+    if(!backup)delete trainingSaved[trainingKey].blockBackup;
+    trainingSnapshot=null;trainingOutput=null;storeTraining();
+   }else{
+    if(backup)drafts.set(c.key+':block-backup',c.code);else drafts.delete(c.key+':block-backup');
+    drafts.set(c.key+':code',code);drafts.set(c.key+':output','');dirtyDrafts.add(c.key+':code');checkResults.delete(c.key);inlineTraces.delete(c.key);
+    const state=liveStates.get(c.key);if(state){state.revision++;clearTimeout(state.timer);state.timer=null;state.lastCode=null;}
+    persistDrafts();
+   }
+   render();toast(t('Python коды қолданылды. Болжамыңды жазып, орындап тексер.','Код Python применён. Запиши прогноз, выполни и проверь.'));
+  }
+  actions['blocks-open']=async b=>{
+   capture();const prefix=b.dataset.prefix,c=blockContext(prefix);
+   await window.CT_BLOCKS.open({project:config.firebase?.projectId||'code-think',userId:user.id,context:c.context,lang,title:c.title,scenario:c.scenario,
+    readCurrentCode:()=>blockContext(prefix).code,
+    onApply:(code,expected)=>applyBlockCode(prefix,c.context,code,expected),
+    onClose:()=>document.querySelector(`[data-do="blocks-open"][data-prefix="${prefix}"]`)?.focus()});
+  };
+  actions['blocks-restore']=b=>{
+   const prefix=b.dataset.prefix,c=blockContext(prefix),backup=prefix==='training'?trainingDraft().blockBackup:drafts.get(c.key+':block-backup');
+   if(typeof backup!=='string')return;applyBlockCode(prefix,c.context,backup,c.code,false);
+  };
+
   boot();
 })();
