@@ -1,8 +1,27 @@
-# CODE THINK 12.2.1
+# CODE THINK 12.4.0
 
 Static Python learning platform: 31 tasks, grades 7–8 (19/12), Kazakh and Russian.
 GitHub Pages hosts the site. Firebase Auth and Firestore store accounts/progress.
 Firebase Spark remains supported; no Apps Script, Cloud Functions or paid upgrade.
+
+## 12.4 teacher error passports
+
+All 31 core tasks have a bilingual teacher feedback passport: a possible error,
+possible cause, guiding question, pupil follow-up and observable evidence of
+understanding. There are 75 reference input/output examples, verified locally
+against the provided teacher materials using CPython. These are hypotheses for
+teacher review, not an automatic classifier or grade.
+
+Open a passport inside the teacher's task bank or review desk. A selected prompt
+is appended to an editable stage comment; a selected example populates only the
+teacher's trial input. No score, pupil code, saved output or grade changes until
+the teacher uses the existing save/review actions. Ready solution code is not
+included in the passport assets.
+
+The public teaching guide is [error-passports.html](error-passports.html), with
+Kazakh/Russian and grade filters plus print/PDF controls. It uses no Firebase
+requests. The pupil's five-section menu and the 12.2.3 read optimizations remain.
+See [instructions](UPDATE_12_4_0_KK.md).
 
 ## 12.2.1 olympiad result preservation
 

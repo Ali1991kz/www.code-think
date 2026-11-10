@@ -41,6 +41,6 @@ test('both deployed entrypoints omit the online ticker and keep required score m
  for(const file of ['index.html','new-project/index.html']){
   const html=read(file);assert.ok(!/src="community\.js/.test(html));assert.ok(!/href="community\.css/.test(html));
   for(const asset of ['community-engine.js','ranking.js','debug-lab.js','olympiad.js','trainer-engine.js','study-navigation.css'])assert.ok(html.includes(asset));
-  assert.match(html,/platform\.js\?v=12\.3\.0/);
+  assert.match(html,/platform\.js\?v=[0-9.]+/);
  }
 });

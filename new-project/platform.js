@@ -788,5 +788,42 @@
   const renderBeforeRanking=render;
   render=function(){window.CT_RANKING.context(rankingContext());if(!(page==='ranking'||(user?.role==='teacher'&&teacherTab==='ranking')))window.CT_RANKING.leave();renderBeforeRanking();};
 
+  // 12.4: teacher-selected error passports. No automatic classification or grade.
+  const bankBeforePassports=teacherBank;
+  teacherBank=function(){
+   let html=bankBeforePassports();
+   for(const task of teacherWS.tasks){
+    const button=action('teacher-solution',t('Мұғалімге арналған шешім','Решение для учителя'),'',`data-id="${task.id}"`);
+    html=html.replace(button,window.CT_ERROR_PASSPORTS.card(task,lang)+button);
+   }
+   return `<div class="note passport-bank-link"><a href="error-passports.html" target="_blank" rel="noopener">${t('31 қате паспорты · Мұғалімнің әдістемелік жинағы','31 паспорт ошибки · Методический сборник учителя')} ↗</a></div>`+html;
+  };
+  const reviewBeforePassports=reviewDesk;
+  reviewDesk=function(){
+   const html=reviewBeforePassports();if(!reviewData)return html;
+   const card=window.CT_ERROR_PASSPORTS.card(reviewData.task,lang,{review:true,editable:['submitted','graded'].includes(reviewData.attempt.status)});
+   return html.replace('<section class="review-assessment card">','<section class="review-assessment card">'+card);
+  };
+  function currentPassport(button){
+   if(user?.role!=='teacher'||!reviewData)throw Error(t('Мұғалімнің тексеру терезесін ашыңыз.','Откройте окно проверки учителя.'));
+   const p=window.CT_ERROR_PASSPORTS.get(reviewData.task);
+   if(!p||p.sourceKey!==button.dataset.passport)throw Error(t('Бұл жұмысқа сәйкес паспорт табылмады.','Подходящий паспорт для этой работы не найден.'));
+   return p;
+  }
+  actions['passport-feedback']=b=>{
+   const p=currentPassport(b),at=reviewData.attempt;
+   if(!['submitted','graded'].includes(at.status))throw Error(t('Жұмыс әлі тапсырылмаған.','Работа ещё не сдана.'));
+   const key='feedback:'+at.id+':'+p.stage,text=window.CT_ERROR_PASSPORTS.feedback(p.sourceKey,lang),old=val(key,reviewData.steps.find(s=>s.stepCode===p.stage)?.feedback||'');
+   if(!old.includes(text)){drafts.set(key,old?(old+'\n'+text):text);dirtyDrafts.add(key);persistDrafts();}
+   toast(t('Сұрақ кезең пікіріне қосылды. Тексеріп, бағаны сақтау батырмасын басыңыз.','Вопрос добавлен к этапу. Проверьте комментарий и нажмите сохранение оценки.'));
+  };
+  actions['passport-input']=b=>{
+   const p=currentPassport(b),index=Number(b.dataset.case);
+   if(!Number.isInteger(index)||index<0||index>=p.checks.length)throw Error(t('Сынақ мысалын таңдаңыз.','Выберите пример.'));
+   drafts.set('review-input:'+reviewData.attempt.id,p.checks[index].input);
+   toast(t('Кіріс қойылды. Орындауды мұғалім өзі бастайды.','Ввод подставлен. Запуск выполняет учитель.'));
+  };
+
+
   boot();
 })();

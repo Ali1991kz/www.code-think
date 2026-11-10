@@ -1,0 +1,11 @@
+.passport-card{border:1px solid var(--border,#cddaea);border-radius:14px;background:var(--surface,#fff);margin:18px 0;overflow:hidden;color:inherit}
+.passport-card>summary{padding:16px;cursor:pointer;font-weight:700;display:list-item;min-height:44px;overflow-wrap:anywhere}
+.passport-card>summary small{display:block;margin:6px 0 0;font-weight:400;color:var(--muted,#526b83)}
+.passport-body{padding:0 18px 18px}.passport-body dl{margin:18px 0}.passport-body dt{font-weight:700;margin-top:18px}.passport-body dd{margin:7px 0 0;line-height:1.6}
+.passport-question{border-left:4px solid var(--primary,#176bb4);background:var(--soft,#eaf4fb);padding:12px 16px;border-radius:0 10px 10px 0}
+.passport-caution{font-size:14px;color:var(--muted,#526b83)}.passport-actions{display:flex;flex-wrap:wrap;gap:10px;margin:18px 0 8px}.passport-actions button,.passport-check button{white-space:normal;min-height:44px}
+.passport-checks{margin:18px 0;border-top:1px solid var(--border,#cddaea);padding-top:14px}.passport-checks>summary{font-weight:600;cursor:pointer;min-height:44px}
+.passport-check{padding:16px 0;border-bottom:1px solid var(--border,#cddaea)}.passport-io{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:14px}.passport-io>div{min-width:0}.passport-io h4{font-size:14px;margin:12px 0 6px}.passport-io pre{white-space:pre-wrap;overflow-wrap:anywhere;background:var(--surface2,#f2f6fb);padding:12px;border-radius:10px;color:inherit}
+.passport-next{padding-top:14px;border-top:1px solid var(--border,#cddaea);line-height:1.6}.passport-review{margin:22px 0}.passport-bank-link{margin-bottom:22px}.passport-review .passport-card{margin:0}
+@media(max-width:650px){.passport-io{grid-template-columns:1fr}.passport-body{padding:0 14px 14px}.passport-actions button{width:100%}}
+@media print{.passport-card{break-inside:avoid;border-radius:0}.passport-card>summary{font-size:15px}.passport-body{font-size:12px}.passport-actions,.passport-check button,.passport-bank-link{display:none!important}.passport-checks:not([open])>*:not(summary){display:none}.passport-question{background:#fff;border-color:#333}}
