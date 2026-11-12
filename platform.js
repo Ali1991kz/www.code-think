@@ -877,6 +877,17 @@
    if(typeof backup!=='string')return;applyBlockCode(prefix,c.context,backup,c.code,false);
   };
 
+  // 12.6: optional local reading aid, mounted only beside pupil code editors.
+  let codeHelpViews=[];
+  const renderBeforeCodeHelp=render;
+  render=function(){
+   codeHelpViews.forEach(view=>view.destroy());codeHelpViews=[];renderBeforeCodeHelp();
+   if(user?.role!=='student'||user.mustChangePassword)return;
+   document.querySelectorAll('textarea.code-editor[data-draft$=":code"],textarea[data-training-field="code"]').forEach(editor=>{
+    codeHelpViews.push(window.CT_CODE_HELP.mount(editor,{lang,preferenceKey:'ct-code-help:v1:'+(config.firebase?.projectId||'code-think')+':'+user.id}));
+   });
+  };
+
   boot();
 })();
 

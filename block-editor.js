@@ -19,7 +19,7 @@
   try{return await libraries;}catch(e){libraries=null;throw e;}
  }
  function download(text,name){const blob=new Blob([text],{type:'application/json;charset=utf-8'}),url=URL.createObjectURL(blob),a=document.createElement('a');a.href=url;a.download=name;document.body.append(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(url),10000);}
- function close(){if(!current)return;const c=current;c.flush?.();current=null;clearTimeout(c.timer);c.observer?.disconnect();c.ws?.dispose();if(c.dialog.open)c.dialog.close();c.dialog.remove();c.options.onClose?.();}
+ function close(){if(!current)return;const c=current;c.flush?.();current=null;clearTimeout(c.timer);c.observer?.disconnect();c.explainer?.destroy();c.ws?.dispose();if(c.dialog.open)c.dialog.close();c.dialog.remove();c.options.onClose?.();}
  async function open(options){
   close();const lang=options.lang==='ru'?'ru':'kk',s=words[lang];
   if(!options.userId||!options.context||typeof options.onApply!=='function')throw Error(s.error);
@@ -40,6 +40,7 @@
     if(current!==c)return;
     try{
      c.report=model.generate(c.ws,g,lang);q('.ct-block-preview').value=c.report.code;
+     c.links=null;c.explainer?.refresh({force:true});
      q('[data-block-functions]').hidden=!(c.report.hasFunctions||c.report.hasExpression);
      const replacement=!!c.original.trim()&&c.original!==c.report.code;q('.ct-block-confirm').hidden=!replacement;
      q('[data-block-apply]').disabled=!!c.report.issues.length||(replacement&&!q('[data-block-replace]').checked);
@@ -52,6 +53,11 @@
     }catch{c.report=null;q('.ct-block-preview').value='';q('[data-block-apply]').disabled=true;status(s.invalid,true);}
    }
    update();
+   // Optional source-reading aid; links never insert markers into pupil code.
+   function links(){if(!c.links){try{c.links=scope.CT_CODE_MEANING.blockLines(c.ws,g,c.report?.code||'');}catch{c.links={byLine:{},byBlock:{}};}}return c.links;}
+   c.explainer=scope.CT_CODE_HELP?.mount(q('.ct-block-preview'),{lang,preferenceKey:'ct-code-help:v1:'+options.project+':'+options.userId,
+    onLine:line=>c.ws.highlightBlock(links().byLine[line]||null),onHide:()=>c.ws.highlightBlock(null)});
+   c.ws.addChangeListener(e=>{if(e.type===B.Events.SELECTED&&c.explainer?.isEnabled()){const line=links().byBlock[e.newElementId];if(line)c.explainer.setLine(line);}});
    c.flush=()=>update(true);
    c.ws.clearUndo();
    c.ws.addChangeListener(e=>{if(e.isUiEvent)return;clearTimeout(c.timer);c.timer=setTimeout(()=>update(true),150);});

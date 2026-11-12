@@ -1,4 +1,8 @@
-# CODE THINK 12.5.0
+# CODE THINK 12.6.0
+
+## Optional Kazakh code explanations (12.6.0)
+
+In the pupil's editable task code phase and Python trainer, enable **Қазақша түсіндірме** above the editor. Select a code line to read its Kazakh meaning; select a command chip for its definition. A collapsible Python-to-Kazakh dictionary is included. The block editor links selected blocks with their generated Python lines. This local reading aid is off by default, changes no source or grades, and makes no Firebase requests. Basic Python structures are supported; incomplete and unsupported structures receive an explicit limitation message. Actual execution remains the existing Python runner. See [UPDATE_12_6_0_KK.md](UPDATE_12_6_0_KK.md).
 
 ## Optional block editor (12.5.0)
 
