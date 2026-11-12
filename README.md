@@ -1,4 +1,8 @@
-# CODE THINK 12.6.0
+# CODE THINK 12.6.1
+
+## Contextual line-by-line explanations (12.6.1)
+
+The Kazakh reading aid now includes **Осы жол не істейді?** and an expandable **Бүкіл кодтың қазақша түсіндірмесі**. It follows earlier supported definitions to explain inputs, lists, sums and division in the pupil's actual program. F-string output describes labels, referenced values and fixed decimal precision. Selecting a line number selects that exact source line; edits refresh the explanations. No execution, grading or Firebase calls are added. Unsupported constructs retain an explicit limitation. See [UPDATE_12_6_1_KK.md](UPDATE_12_6_1_KK.md).
 
 ## Optional Kazakh code explanations (12.6.0)
 

@@ -13,6 +13,6 @@ for(const file of ['platform.js','new-project/platform.js']){
  });
 }
 test('both entrypoints order local helpers before block editor/platform without touching Firebase adapters',()=>{
- for(const f of ['index.html','new-project/index.html']){const html=read(f);for(const a of ['code-meaning.js?v=12.6.0','code-help.js?v=12.6.0','code-help.css?v=12.6.0'])assert.ok(html.includes(a));assert.ok(html.indexOf('code-meaning.js')<html.indexOf('code-help.js'));assert.ok(html.indexOf('code-help.js')<html.indexOf('block-editor.js'));assert.ok(html.indexOf('code-help.js')<html.indexOf('platform.js'));}
- for(const file of ['code-meaning.js','code-help.js'])assert.ok(!/CT_FIREBASE|\bfetch\s*\(|\beval\s*\(|new Worker|\.postMessage|\.value\s*=/.test(read(file)),file);
+ for(const f of ['index.html','new-project/index.html']){const html=read(f);for(const a of ['code-meaning.js?v=12.6.1','code-help.js?v=12.6.1','code-help.css?v=12.6.1','code-context.js?v=12.6.1'])assert.ok(html.includes(a));assert.ok(html.indexOf('code-meaning.js')<html.indexOf('code-context.js'));assert.ok(html.indexOf('code-context.js')<html.indexOf('code-help.js'));assert.ok(html.indexOf('code-help.js')<html.indexOf('block-editor.js'));assert.ok(html.indexOf('code-help.js')<html.indexOf('platform.js'));}
+ for(const file of ['code-meaning.js','code-context.js','code-help.js'])assert.ok(!/CT_FIREBASE|\bfetch\s*\(|\beval\s*\(|new Worker|\.postMessage|\.value\s*=/.test(read(file)),file);
 });

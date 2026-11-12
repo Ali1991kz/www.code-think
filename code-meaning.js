@@ -137,8 +137,8 @@
   }return names;
  }
  function tokenMeaning(token){if(!token)return null;const entry=dictionary[token.text];return entry?{token:token.text,title:entry[0],meaning:entry[1]}:null;}
- function analyze(source,offset=0){
-  source=String(source);offset=Math.max(0,Math.min(Number(offset)||0,source.length));const tokens=lex(source),line=source.slice(0,offset).split('\n').length,lines=source.split('\n'),text=lines[line-1]||'',ts=lineTokens(tokens,line),shadowed=bindings(tokens);
+ function analyze(source,offset=0,prepared=null){
+  source=String(source);offset=Math.max(0,Math.min(Number(offset)||0,source.length));const tokens=prepared?.tokens||lex(source),line=source.slice(0,offset).split('\n').length,lines=prepared?.lines||source.split('\n'),text=lines[line-1]||'',ts=lineTokens(tokens,line),shadowed=prepared?.shadowed||bindings(tokens);
   const start=offset===0?0:source.lastIndexOf('\n',offset-1)+1,end=start+text.length;
   const covering=tokens.find(t=>t.start<start&&t.end>start);
   function contextual(t){if(!t||t.kind==='comment'||t.kind==='string')return null;const i=ts.indexOf(t);if(t.text==='='&&i>=0){let depth=0;for(const x of ts.slice(0,i)){if(x.text==='(')depth++;if(x.text===')')depth--;}if(depth>0)return {token:'=',title:ts[0]?.text==='def'?'Параметрдің әдепкі мәні':'Атаулы аргумент',meaning:ts[0]?.text==='def'?'Функция параметрінің әдепкі мәнін белгілейді.':'Функцияға аргументті атымен береді; бұл жолда сыртқы айнымалыға мән беру емес.'};}return tokenMeaning(t);}
@@ -190,5 +190,6 @@
   for(const b of ws.getAllBlocks(false)){let parent=b;while(parent&&!byBlock[parent.id])parent=parent.getParent();if(parent)byBlock[b.id]=byBlock[parent.id];}
   return {byLine,byBlock};
  }
- scope.CT_CODE_MEANING={version:'12.6.0',lex,analyze,parseExpression,tokenMeaning,dictionary,blockLines};
+ function analyzeLines(source){source=String(source);const tokens=lex(source),lines=source.split('\n'),prepared={tokens,lines,shadowed:bindings(tokens)};let offset=0;return lines.map(text=>{const report=analyze(source,offset,prepared);offset+=text.length+1;return report;});}
+ scope.CT_CODE_MEANING={version:'12.6.1',lex,analyze,analyzeLines,parseExpression,tokenMeaning,dictionary,blockLines};
 })(typeof window!=='undefined'?window:globalThis);
