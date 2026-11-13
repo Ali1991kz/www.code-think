@@ -1,0 +1,16 @@
+'use strict';
+const fs=require('node:fs'),path=require('node:path'),vm=require('node:vm'),crypto=require('node:crypto').webcrypto,root=path.resolve(__dirname,'../..');
+function school(file='firebase-direct.js'){
+ const db=new Map(),writes=[],reads=[],seed=(k,row)=>db.set(k,{...row,__createdAt:'2026-01-01T00:00:00Z',__updatedAt:'2026-01-01T00:00:00Z'});
+ for(const id of ['t','s1','s2'])seed('Users/'+id,{id,authUid:id,role:id==='t'?'teacher':'student',active:true,mustChangePassword:false,grade:'8'});
+ seed('Tasks/task',{id:'task',sourceKey:'guide-05',grade:'8'});seed('Assignments/a',{id:'a',taskId:'task',classId:'8A',status:'published'});seed('ClassStudents/s1',{userId:'s1',classId:'8A'});seed('TaskAttempts/work',{id:'work',assignmentId:'a',userId:'s1',status:'in_progress',score:9,code:'original code',inputData:'original input'});seed('TaskSteps/work__TH__5',{attemptId:'work',stepCode:'TH',modelVersion:5,response:'saved comparison',score:2,feedback:'keep'});seed('LearningEvidence/work:INK',{id:'work:INK',userId:'s1',__ownerId:'s1',attemptId:'work',kind:'stage',step:'INK',detailsJson:JSON.stringify({fields:['old answer','old reason'],quiz:{version:1,answers:[0,1]}})});
+ function client(actor){
+  const win={CODE_THINK_CONFIG:{firebase:{projectId:'demo-code-think',apiKey:'test'}},CT_CREDENTIAL_VAULT:{lock(){}}},base='projects/demo-code-think/databases/(default)/documents';let val,plain;
+  const doc=(key,row)=>({name:base+'/schools/t/'+key,fields:Object.fromEntries(Object.entries(row).map(([k,v])=>[k,val(v)])),updateTime:row.__updatedAt});
+  async function fetch(url,opts){const body=opts.body?JSON.parse(opts.body):null;let data,status=200;if(url.endsWith(':commit'))data={writeResults:body.writes.map(write=>{const key=write.update.name.split('/schools/t/')[1],row=Object.fromEntries(Object.entries(write.update.fields).map(([k,v])=>[k,plain(v)])),time=new Date().toISOString();for(const tr of write.updateTransforms||[])row[tr.fieldPath]=time;db.set(key,row);writes.push({key,row});return {updateTime:time,transformResults:(write.updateTransforms||[]).map(()=>({timestampValue:time}))};})};else if(url.includes('/identities/'))data={name:base+'/identities/'+actor,fields:{schoolId:val('t'),userId:val(actor)}};else{const key=url.split('/schools/t/')[1],row=db.get(key);reads.push(key);if(row)data=doc(key,row);else{status=404;data={error:{message:'NOT_FOUND'}};}}return {ok:status===200,status,json:async()=>data};}
+  const storage=new Map([[file.startsWith('new-project')?'ct11-firebase-session:code-think-new':'ct11-firebase-session',JSON.stringify({uid:actor,idToken:'mock',expiresAt:Date.now()+3600000})]]),c=vm.createContext({window:win,console,crypto,fetch,location:{hostname:'localhost'},AbortController,setTimeout,clearTimeout,sessionStorage:{getItem:k=>storage.get(k)||null,setItem:(k,v)=>storage.set(k,v),removeItem:k=>storage.delete(k)}});
+  for(const f of ['content.js','learning-core.js','mission-bank.js','mission-engine.js',file])vm.runInContext(fs.readFileSync(path.join(root,f),'utf8'),c);val=win.CT_FIREBASE._test.val;plain=win.CT_FIREBASE._test.plain;return {api:win.CT_FIREBASE,engine:win.CT_MISSIONS};
+ }
+ return {db,writes,reads,seed,client};
+}
+module.exports={school};

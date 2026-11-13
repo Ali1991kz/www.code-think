@@ -1,0 +1,55 @@
+{
+  "schema_version": "1.0",
+  "mode": "trainer",
+  "grade": 8,
+  "subject": "Информатика",
+  "topic": "Python алгоритмін өзгерген шартқа бейімдеу",
+  "interface_language": "kk",
+  "content_language": "kk",
+  "supported_languages": [
+    "kk",
+    "ru"
+  ],
+  "learning_objectives": [
+    {
+      "id": "working-transfer",
+      "text": "Алгоритмді өзгерген шартқа бейімдеу, Python арқылы тексеру және өзгерісін түсіндіру."
+    }
+  ],
+  "objective_source": "teacher_text",
+  "task_ids": [
+    "guide-05",
+    "guide-10",
+    "guide-11",
+    "guide-20",
+    "guide-21",
+    "guide-22",
+    "guide-26",
+    "guide-27",
+    "guide-28",
+    "guide-29",
+    "guide-30",
+    "guide-31"
+  ],
+  "scoring": "feedback_only",
+  "browser_checks": {
+    "status": "checked_with_synthetic_data",
+    "cases": [
+      "wrong code",
+      "hint",
+      "correct Python",
+      "explanation",
+      "save",
+      "reload",
+      "submit",
+      "teacher first/latest",
+      "kk/ru",
+      "390px"
+    ]
+  },
+  "content_checks": {
+    "status": "checked",
+    "method": "CPython reference candidate executions",
+    "changed_condition_cases": 24
+  }
+}

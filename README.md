@@ -1,4 +1,8 @@
-# CODE THINK 12.6.1
+# CODE THINK 12.7.0
+
+## Task-specific consolidation missions (12.7.0)
+
+All 31 core learning tasks now end with **Бекіту миссиясы / Миссия закрепления** in the Conclusion phase. Pupils adapt a short Python scaffold to a changed condition, run it against 2–3 examples, use up to two hints and explain their change. The original solution remains separate. First/latest browser execution evidence is saved in existing INK records and shown in teacher review; grades and XP remain teacher-controlled. Already submitted legacy work keeps its previous conclusion. No Firestore Rules update or new collection is needed. See [UPDATE_12_7_0_KK.md](UPDATE_12_7_0_KK.md).
 
 ## Contextual line-by-line explanations (12.6.1)
 

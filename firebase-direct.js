@@ -438,6 +438,21 @@
  }
 
  // Store actual first/latest selections; never assign a teacher score here.
+ // Save browser-checked transfer evidence in existing INK documents; no grade/XP.
+ async function saveConclusionMission(p){
+  requirePupil();const id=String(p.attemptId||'');if(!id||id.includes('/'))throw Error('Жұмыс кілті қате. / Неверный ключ работы.');
+  const atDoc=await getDoc(path('TaskAttempts',id)),at=atDoc&&decode(atDoc);if(!at||at.userId!==profile.id||at.status!=='in_progress')throw Error('Жұмыс қолжетімсіз. / Работа недоступна.');
+  const assignmentDoc=await getDoc(path('Assignments',at.assignmentId)),assignment=assignmentDoc&&decode(assignmentDoc);if(!assignment||assignment.status!=='published')throw Error('Тапсырма жабық. / Задание закрыто.');
+  const [taskDoc,memberDoc,tested,old,stepDoc]=await Promise.all([getDoc(path('Tasks',assignment.taskId)),getDoc(path('ClassStudents',profile.id)),getDoc(path('TaskSteps',id+'__TH__5')),getDoc(path('LearningEvidence',id+':INK')),getDoc(path('TaskSteps',id+'__INK__5'))]);
+  if(!taskDoc||!memberDoc||decode(memberDoc).classId!==assignment.classId||String(decode(taskDoc).grade)!==String(profile.grade))throw Error('Есеп қолжетімсіз. / Задача недоступна.');
+  if(!tested||!String(decode(tested).response||'').trim())throw Error('Алдымен кодты орындап, тексеруді сақта. / Сначала выполни код и сохрани проверку.');
+  const task=decode(taskDoc),key=task.sourceKey||window.CT_CONTENT.tasks.find(x=>x.kk.title===task.title)?.sourceKey,engine=window.CT_MISSIONS;let details={};try{details=JSON.parse(old?decode(old).detailsJson:'{}');}catch{}
+  const mission=engine.record(key,details.mission,p),fields=engine.fields(key,mission),previous=stepDoc&&decode(stepDoc);
+  const obj={id:id+':INK',userId:profile.id,__ownerId:profile.id,attemptId:id,kind:'stage',step:'INK',detailsJson:JSON.stringify({...details,legacyFields:details.legacyFields||(!details.mission?details.fields:undefined),legacyResponse:details.legacyResponse||(!details.mission?previous?.response:undefined),fields,mission,sourceKey:key,flowVersion:5}),updatedAt:new Date().toISOString()};
+  const writes=[documentWrite(path('LearningEvidence',id+':INK'),obj,old)];if(engine.results(key,mission).complete)writes.push(documentWrite(path('TaskSteps',id+'__INK__5'),{attemptId:id,stepCode:'INK',modelVersion:5,response:fields.join('\n\n'),score:previous?.score??'',feedback:previous?.feedback??'',updatedAt:new Date().toISOString(),__ownerId:profile.id},stepDoc));
+  await commit(writes);return {evidence:obj,mission,results:engine.results(key,mission)};
+ }
+
  async function saveConclusionQuiz(p){
   requirePupil();const id=String(p.attemptId||'');if(!id||id.includes('/'))throw Error('Жұмыс кілті қате. / Неверный ключ работы.');
   const atDoc=await getDoc(path('TaskAttempts',id)),at=atDoc&&decode(atDoc);
@@ -789,6 +804,7 @@
   if(action==='setOlympiadAccess')return setOlympiadAccess(p);
   if(action==='saveOlympiadWork')return saveOlympiadWork(p);
   if(action==='reviewOlympiadWork')return reviewOlympiadWork(p);
+  if(action==='saveConclusionMission')return saveConclusionMission(p);
   if(action==='saveConclusionQuiz')return saveConclusionQuiz(p);
   if(action==='recordTaskTime')return recordTaskTime(p);
   if(action==='teacherReviewWorkspace')return teacherReviewWorkspace(p);
