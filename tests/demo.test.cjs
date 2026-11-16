@@ -13,7 +13,7 @@ test('demo entry has no real adapter/config and denies Firebase endpoints via CS
  assert.ok(srcs.some(s=>s.startsWith('demo-config.js')));assert.ok(srcs.some(s=>s.startsWith('demo-adapter.js')));
  assert.ok(!srcs.some(s=>/^(?:new-project\/)?(?:config|firebase-direct)\.js/.test(s)));
  assert.match(html,/connect-src 'self' https:\/\/cdn\.jsdelivr\.net;/);assert.doesNotMatch(html,/googleapis\.com|firebaseapp\.com|apiKey/);
- for(const f of ['index.html','new-project/index.html'])assert.match(read(f),/platform.js\?v=12.8.0/);
+ for(const f of ['index.html','new-project/index.html'])assert.match(read(f),/platform.js\?v=12.9.0/);
  for(const f of ['platform.js','new-project/platform.js'])assert.match(read(f),/href="demo.html"/);
 });
 test('pupil local save, reload, teacher review, grading and corrections have no transport',async()=>{
@@ -40,4 +40,12 @@ test('demo example checking is real sample comparison and not unconditional succ
  const d=demo(),p={taskId:'guide-05'};assert.ok((await d.api.call('getTaskTests',p)).tests.length);
  assert.equal((await d.api.call('checkTaskOutputs',{...p,outputs:[{output:'wrong'}]})).passed,0);
  assert.equal((await d.api.call('checkTaskOutputs',{...p,outputs:[{output:'Жалпы: 2800.00\nОрташа: 400.00'}]})).passed,1);
+});
+
+test('demo monitoring contains one synthetic graded pair and keeps another pupil unpaired',async()=>{
+ const teacher=demo('?role=teacher'),ws=await teacher.api.call('schoolWorkspace');
+ const M=require('../monitoring.js'),r=M.build({dashboard:ws.dashboard,workspace:ws.teacherWS,timings:ws.timings});
+ assert.equal(r.summary.students,2);assert.equal(r.summary.paired,1);assert.equal(r.summary.delta,3);
+ assert.equal(r.rows.find(r=>r.user.id==='demo-pupil-0').final.score,null);
+ assert.match(ws.dashboard.attempts.find(a=>a.attemptType==='final').teacherComment,/Демонстрациялық/);
 });

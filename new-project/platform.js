@@ -390,6 +390,7 @@
   $('app').addEventListener('keydown',e=>{if(e.key==='Tab'&&!e.shiftKey&&e.target.matches('.code-editor')&&e.target.dataset.draft){e.preventDefault();e.target.setRangeText('    ',e.target.selectionStart,e.target.selectionEnd,'end');drafts.set(e.target.dataset.draft,e.target.value);}});
   $('app').addEventListener('click',e=>{const b=e.target.closest('[data-do]');if(b&&!b.disabled&&actions[b.dataset.do])transact(()=>actions[b.dataset.do](b));});
   $('app').addEventListener('submit',e=>{const form=e.target.closest('[data-form]');if(!form)return;e.preventDefault();transact(async()=>{
+    if(form.dataset.form==='monitor-filter'){actions['monitor-filter']();return;}
     if(form.dataset.form==='change-password'){
       const next=val('newPassword');if(next!==val('repeatPassword'))throw Error(t('Құпиясөздер сәйкес емес.','Пароли не совпадают.'));await api('changePassword',{currentPassword:val('currentPassword'),password:next});token='';user=null;sessionStorage.removeItem('ct11-token:code-think-new');['currentPassword','newPassword','repeatPassword','loginPassword'].forEach(k=>drafts.delete(k));toast(t('Пароль өзгерді. Жаңа парольмен кіріңіз.','Пароль изменён. Войдите с новым паролем.'));
     }else if(form.dataset.form==='login'){
@@ -909,6 +910,39 @@
   taskView=function(){return taskViewBeforeMissions().replace(t('Қорытынды мини-тестінен кейін жұмысты мұғалімге тапсыр.','После итогового мини-теста сдай работу учителю.'),t('Бекіту миссиясын аяқтап, жұмысты мұғалімге тапсыр.','Заверши миссию закрепления и сдай работу учителю.'));};
   const reviewBeforeMissions=reviewDesk;
   reviewDesk=function(){let html=reviewBeforeMissions();if(!reviewData)return html;const record=reviewData.evidence.find(x=>x.kind==='stage'&&x.step==='INK'),mission=pd(record).mission;if(mission)html=html.replace('<section class="review-assessment card">','<section class="review-assessment card">'+window.CT_MISSION_UI.teacher(taskInfo(reviewData.task).sourceKey,mission,lang)).replace(t('Қорытынды мини-тесті','Итоговый мини-тест'),t('Бұрынғы қорытынды мини-тесті','Предыдущий итоговый мини-тест')).replace(t('Мини-тест автоматты баға қоймайды.','Мини-тест не выставляет оценку автоматически.'),t('Миссия автоматты баға қоймайды.','Миссия не выставляет оценку автоматически.'));return html;};
+
+  // 12.9: monitoring uses only the already-loaded teacher snapshot.
+  let monitorOwner='',monitorFilters={},monitorStudent='',monitorLoadedAt='',monitorFocus=false;
+  function monitorScope(){
+   if(monitorOwner!==(user?.id||'')){monitorOwner=user?.id||'';monitorFilters={};monitorStudent='';monitorLoadedAt='';}
+  }
+  function monitorReport(){monitorScope();return window.CT_MONITORING.build({dashboard,workspace:teacherWS,timings:taskTimes,content},monitorFilters);}
+  function requireMonitorTeacher(){if(user?.role!=='teacher')throw Error(t('Мұғалім аккаунты қажет.','Нужен аккаунт учителя.'));monitorScope();}
+  const refreshBeforeMonitoring=refresh;
+  refresh=async function(){const owner=user?.id,keep=teacherTab==='monitoring';await refreshBeforeMonitoring();monitorScope();if(user?.role==='teacher'){monitorLoadedAt=new Date().toISOString();if(keep&&user.id===owner)teacherTab='monitoring';}};
+  const teacherBeforeMonitoring=teacherView;
+  teacherView=function(){
+   if(user?.role!=='teacher')return '';
+   let html=teacherBeforeMonitoring();
+   html=html.replace('</nav>',action('teacher-tab',t('Мониторинг және талдау','Мониторинг и анализ'),teacherTab==='monitoring'?'active':'','data-tab="monitoring"')+'</nav>');
+   if(teacherTab==='monitoring')return html.slice(0,html.indexOf('</nav>')+6)+window.CT_MONITORING.html(monitorReport(),{lang,selectedId:monitorStudent,loadedAt:monitorLoadedAt});
+   return html;
+  };
+  const overviewBeforeMonitoring=teacherOverview;
+  teacherOverview=function(){return `<section class="card monitor-entry"><div><h2>${t('Бастапқыдан қорытындыға дейін','От начального результата к итоговому')}</h2><p class="muted">${t('Сыныптың ілгерілеуін салыстырып, кімге көмек қажет екенін қараңыз.','Сравните прогресс класса и посмотрите, кому нужна помощь.')}</p></div>${action('teacher-tab',t('Мониторингті ашу','Открыть мониторинг')+' →','primary','data-tab="monitoring"')}</section>`+overviewBeforeMonitoring();};
+  const tabBeforeMonitoring=actions['teacher-tab'];
+  actions['teacher-tab']=async b=>{if(b.dataset.tab==='monitoring'){requireMonitorTeacher();teacherTab='monitoring';return;}return tabBeforeMonitoring(b);};
+  actions['monitor-filter']=()=>{
+   requireMonitorTeacher();const form=$('app').querySelector('[data-form="monitor-filter"]');
+   monitorFilters={classKey:form?.querySelector('[data-monitor-class]')?.value||'',search:form?.querySelector('[data-monitor-search]')?.value.trim()||'',status:form?.querySelector('[data-monitor-status]')?.value||''};monitorStudent='';
+  };
+  actions['monitor-reset']=()=>{requireMonitorTeacher();monitorFilters={};monitorStudent='';};
+  actions['monitor-student']=b=>{requireMonitorTeacher();monitorStudent=monitorReport().rows.some(r=>r.user.id===b.dataset.id)?b.dataset.id:'';monitorFocus=!!monitorStudent;};
+  actions['monitor-close']=()=>{requireMonitorTeacher();monitorStudent='';};
+  actions['monitor-export']=()=>{requireMonitorTeacher();csvDownload('CODE_THINK_MONITORING_'+new Date().toISOString().slice(0,10)+'.csv',window.CT_MONITORING.csv(monitorReport(),lang));};
+  $('app').addEventListener('change',e=>{if(!e.target.hasAttribute('data-monitor-class')&&!e.target.hasAttribute('data-monitor-status'))return;transact(()=>actions['monitor-filter']());});
+  const renderBeforeMonitoring=render;
+  render=function(){renderBeforeMonitoring();if(monitorFocus){monitorFocus=false;const el=$('monitor-student-detail');el?.focus?.({preventScroll:true});el?.scrollIntoView?.({block:'start'});}};
 
   boot();
 })();

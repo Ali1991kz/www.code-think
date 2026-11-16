@@ -10,7 +10,9 @@
   const pupils=['Айдана · демо','Арман · демо'].map((name,i)=>({id:'demo-pupil-'+i,name,login:'demo_pupil_'+i,role:'student',grade:'8',className:'8А · ДЕМО',active:true,mustChangePassword:false}));
   const tasks=copy(window.CT_CORE.taskSeed),assignment=task=>({id:'demo-'+task.id,taskId:task.id,classId:'demo-class',title:task.title,status:'published',createdBy:teacher.id,createdAt:now()});
   const tables={Users:[teacher,...pupils],Classes:[{id:'demo-class',name:'8А · ДЕМО',grade:'8',teacherId:teacher.id,active:true}],ClassStudents:pupils.map(p=>({classId:'demo-class',userId:p.id})),Tasks:tasks,Assignments:tasks.filter(t=>t.grade==='8').map(assignment),Attempts:pupils.map(p=>({id:p.id+'-baseline',userId:p.id,grade:'8',status:'graded',attemptType:'baseline',totalScore:15,teacherComment:'Демонстрациялық бастапқы нәтиже.'})),TaskAttempts:[],TaskSteps:[],LearningEvidence:[],DemoTimings:[],DemoProfiles:{}};
-  for(const [i,p]of pupils.entries()){
+   // Synthetic comparison example, not a measured classroom outcome.
+   tables.Attempts.push({id:'demo-pupil-1-final',userId:'demo-pupil-1',grade:'8',status:'graded',attemptType:'final',totalScore:18,teacherComment:'Демонстрациялық қорытынды нәтиже. Нақты оқушы өлшемі емес.'});
+   for(const [i,p]of pupils.entries()){
    const id='demo-work-'+i,code=i?sampleCode.replace('total / 7','total / 6'):sampleCode;
    tables.TaskAttempts.push({id,assignmentId:'demo-guide-05',userId:p.id,status:i?'submitted':'in_progress',pedagogyVersion:9,code,inputData:'100\n200\n300\n400\n0\n200\n200',output:i?'Жалпы: 1400.00\nОрташа: 233.33':'',submittedAt:i?now():'',score:'',teacherComment:''});
    const fields={C:['Жеті күннің шығыны теңгемен берілген.','Жалпы және орташа шығынды табамын.'],OD:['Кіріс: 7 нақты сан. Шығыс: жалпы және орташа шығын.','Мәндерді тізімге жинап, қосындыны 7-ге бөлемін.'],E:['Кодты жоспар бойынша жаздым.','Цикл жеті шығынды оқиды.'],TH:['Жалпы: 1400.00; Орташа: 200.00.','Орташа шығынды күн санына бөлу арқылы тексердім.'],INK:['Қосынды барлық шығынды біріктіреді.','Басқа күн саны болса, цикл мен бөлгіш бірге өзгереді.']};

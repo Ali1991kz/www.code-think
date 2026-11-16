@@ -1,4 +1,8 @@
-# CODE THINK 12.7.0
+# CODE THINK 12.9.0
+
+## Teacher monitoring (12.9.0)
+
+Teachers can compare baseline and final diagnostics, inspect class and individual progress, filter by class/pupil/status, review task difficulty summaries, and export the current view to CSV. All analysis uses the existing in-memory workspace: opening, filtering, detail views and export add no Firebase requests or writes. Explicit Refresh uses the existing workspace read. Missing grades remain unassessed; averages use only the same pupils with both valid grades. See [usage and definitions](UPDATE_12_9_0_KK.md).
 
 ## Task-specific consolidation missions (12.7.0)
 
