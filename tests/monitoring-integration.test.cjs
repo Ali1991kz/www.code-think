@@ -31,7 +31,7 @@ for(const file of ['platform.js','new-project/platform.js']){
  });
 }
 test('all three entrypoints load the static monitor before platform; model has no transport or persistence',()=>{
- for(const p of ['index.html','new-project/index.html','demo.html']){const html=read(p);assert.match(html,/monitoring.css\?v=12.9.0/);assert.ok(html.indexOf('monitoring.js?')<html.indexOf('platform.js?'));assert.match(html,/platform.js\?v=12.9.0/);}
+ for(const p of ['index.html','new-project/index.html','demo.html']){const html=read(p);assert.match(html,/monitoring.css\?v=12.9.0/);assert.ok(html.indexOf('monitoring.js?')<html.indexOf('platform.js?'));assert.match(html,/platform.js\?v=\d+\.\d+\.\d+/);}
  assert.doesNotMatch(read('monitoring.js'),/\bfetch\s*\(|XMLHttpRequest|sendBeacon|localStorage|sessionStorage|setInterval|CT_FIREBASE|WebSocket/);
 });
 test('CSV exports current filtered snapshot with absent grades labelled; no passwords or logins',()=>{

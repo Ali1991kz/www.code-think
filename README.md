@@ -1,12 +1,12 @@
-# CODE THINK 12.9.0
+# CODE THINK 12.10.0
 
 ## Teacher monitoring (12.9.0)
 
 Teachers can compare baseline and final diagnostics, inspect class and individual progress, filter by class/pupil/status, review task difficulty summaries, and export the current view to CSV. All analysis uses the existing in-memory workspace: opening, filtering, detail views and export add no Firebase requests or writes. Explicit Refresh uses the existing workspace read. Missing grades remain unassessed; averages use only the same pupils with both valid grades. See [usage and definitions](UPDATE_12_9_0_KK.md).
 
-## Task-specific consolidation missions (12.7.0)
+## Short task-specific conclusion tests (12.10.0)
 
-All 31 core learning tasks now end with **Бекіту миссиясы / Миссия закрепления** in the Conclusion phase. Pupils adapt a short Python scaffold to a changed condition, run it against 2–3 examples, use up to two hints and explain their change. The original solution remains separate. First/latest browser execution evidence is saved in existing INK records and shown in teacher review; grades and XP remain teacher-controlled. Already submitted legacy work keeps its previous conclusion. No Firestore Rules update or new collection is needed. See [UPDATE_12_7_0_KK.md](UPDATE_12_7_0_KK.md).
+All 31 core tasks end with two bilingual, task-specific multiple-choice questions (62 questions total). Each selection shows the correct answer and a brief explanation. First and latest selections are saved for teacher review; feedback retries do not award XP or automatically change teacher grades. Two answered questions are required, without forcing a perfect score. Earlier submitted mission evidence and grades remain read-only. The demo supports the same flow locally with no Firebase transport. See [UPDATE_12_10_0_KK.md](UPDATE_12_10_0_KK.md).
 
 ## Contextual line-by-line explanations (12.6.1)
 

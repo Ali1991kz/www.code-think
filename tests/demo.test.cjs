@@ -5,7 +5,7 @@ function demo(search='',saved=new Map()){
  const production=new Map([['ct11-token','REAL_SESSION'],['ct11-token:code-think-new','OTHER_SESSION'],['ct11-drafts:real-pupil','REAL_DRAFT']]);
  const storage={getItem:k=>saved.get(k)||production.get(k)||null,setItem:(k,v)=>{assert.ok(k.startsWith('ct-demo:v1:'));saved.set(k,String(v));},removeItem:k=>{assert.ok(k.startsWith('ct-demo:v1:'));saved.delete(k);}};
  const w={sessionStorage:storage},network=()=>{throw Error('NETWORK FORBIDDEN');},ctx=vm.createContext({window:w,location:{search},URLSearchParams,crypto,fetch:network,XMLHttpRequest:network,WebSocket:network,navigator:{sendBeacon:network}});
- for(const f of ['demo-config.js','content.js','pedagogy.js','learning-core.js','mission-bank.js','mission-engine.js','demo-adapter.js'])vm.runInContext(read(f),ctx,{filename:f});
+ for(const f of ['demo-config.js','content.js','pedagogy.js','learning-core.js','conclusion-bank.js','conclusion-engine.js','mission-bank.js','mission-engine.js','demo-adapter.js'])vm.runInContext(read(f),ctx,{filename:f});
  return {api:w.CT_FIREBASE,store:saved,production};
 }
 test('demo entry has no real adapter/config and denies Firebase endpoints via CSP',()=>{
@@ -13,7 +13,7 @@ test('demo entry has no real adapter/config and denies Firebase endpoints via CS
  assert.ok(srcs.some(s=>s.startsWith('demo-config.js')));assert.ok(srcs.some(s=>s.startsWith('demo-adapter.js')));
  assert.ok(!srcs.some(s=>/^(?:new-project\/)?(?:config|firebase-direct)\.js/.test(s)));
  assert.match(html,/connect-src 'self' https:\/\/cdn\.jsdelivr\.net;/);assert.doesNotMatch(html,/googleapis\.com|firebaseapp\.com|apiKey/);
- for(const f of ['index.html','new-project/index.html'])assert.match(read(f),/platform.js\?v=12.9.0/);
+ for(const f of ['index.html','new-project/index.html'])assert.match(read(f),/platform.js\?v=12.10.0/);
  for(const f of ['platform.js','new-project/platform.js'])assert.match(read(f),/href="demo.html"/);
 });
 test('pupil local save, reload, teacher review, grading and corrections have no transport',async()=>{
@@ -48,4 +48,13 @@ test('demo monitoring contains one synthetic graded pair and keeps another pupil
  assert.equal(r.summary.students,2);assert.equal(r.summary.paired,1);assert.equal(r.summary.delta,3);
  assert.equal(r.rows.find(r=>r.user.id==='demo-pupil-0').final.score,null);
  assert.match(ws.dashboard.attempts.find(a=>a.attemptType==='final').teacherComment,/Демонстрациялық/);
+});
+
+test('demo conclusion quiz gives feedback, persists first/latest selections on reload and shows them in teacher review without transport',async()=>{
+ const d=demo();await d.api.call('saveTaskStep',{attemptId:'demo-work-0',stepCode:'E',response:'saved code'});await d.api.call('saveTaskStep',{attemptId:'demo-work-0',stepCode:'TH',response:'saved comparison'});
+ let r=await d.api.call('saveConclusionQuiz',{attemptId:'demo-work-0',question:0,choice:0});assert.equal(r.results.complete,false);
+ r=await d.api.call('saveConclusionQuiz',{attemptId:'demo-work-0',question:0,choice:2});assert.equal(r.quiz.firstAnswers[0],0);
+ r=await demo('',d.store).api.call('saveConclusionQuiz',{attemptId:'demo-work-0',question:1,choice:0});assert.equal(r.results.complete,true);assert.equal(r.results.firstCorrect,1);assert.equal(r.results.latestCorrect,2);
+ const review=await demo('?role=teacher',d.store).api.call('teacherReviewWorkspace',{attemptId:'demo-work-0'}),details=JSON.parse(review.evidence.find(x=>x.step==='INK').detailsJson);assert.equal(details.quiz.firstAnswers[0],0);assert.equal(details.quiz.answers[0],2);assert.equal(review.attempt.score,'');assert.match(review.steps.find(x=>x.stepCode==='INK').response,/700/);
+ await assert.rejects(d.api.call('saveConclusionQuiz',{attemptId:'demo-work-1',question:0,choice:0}));
 });

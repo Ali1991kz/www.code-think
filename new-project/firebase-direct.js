@@ -457,13 +457,15 @@
   requirePupil();const id=String(p.attemptId||'');if(!id||id.includes('/'))throw Error('Жұмыс кілті қате. / Неверный ключ работы.');
   const atDoc=await getDoc(path('TaskAttempts',id)),at=atDoc&&decode(atDoc);
   if(!at||at.userId!==profile.id||at.status!=='in_progress')throw Error('Жұмыс қолжетімсіз. / Работа недоступна.');
-  const stageDocs=await queryDocuments('TaskSteps',[['__ownerId',profile.id],['attemptId',id]]),tested=stageDocs.find(d=>decode(d).stepCode==='TH');if(!tested||!String(decode(tested).response||'').trim())throw Error('Алдымен кодты орындап, тексеруді сақта. / Сначала выполни код и сохрани проверку.');
-  const assignment=await getDoc(path('Assignments',at.assignmentId)),task=assignment&&await getDoc(path('Tasks',decode(assignment).taskId));if(!task)throw Error('Есеп табылмады. / Задача не найдена.');
-  const evidenceDocs=await queryDocuments('LearningEvidence',[['__ownerId',profile.id],['attemptId',id]]);
-  const taskData=decode(task),sourceKey=taskData.sourceKey||window.CT_CONTENT.tasks.find(x=>x.kk.title===taskData.title)?.sourceKey,eName=path('LearningEvidence',id+':INK'),old=evidenceDocs.find(d=>d.name===eName),sName=path('TaskSteps',id+'__INK__5'),stepDoc=stageDocs.find(d=>d.name===sName);let details={};try{details=JSON.parse(old?decode(old).detailsJson:'{}');}catch{}
+  const assignmentDoc=await getDoc(path('Assignments',at.assignmentId)),assignment=assignmentDoc&&decode(assignmentDoc);if(!assignment||assignment.status!=='published')throw Error('Тапсырма жабық. / Задание закрыто.');
+  const eName=path('LearningEvidence',id+':INK'),sName=path('TaskSteps',id+'__INK__5');
+  const [task,memberDoc,tested,old,stepDoc]=await Promise.all([getDoc(path('Tasks',assignment.taskId)),getDoc(path('ClassStudents',profile.id)),getDoc(path('TaskSteps',id+'__TH__5')),getDoc(eName),getDoc(sName)]);
+  if(!task||!memberDoc||decode(memberDoc).classId!==assignment.classId||String(decode(task).grade)!==String(profile.grade))throw Error('Есеп қолжетімсіз. / Задача недоступна.');
+  if(!tested||!String(decode(tested).response||'').trim())throw Error('Алдымен кодты орындап, тексеруді сақта. / Сначала выполни код и сохрани проверку.');
+  const taskData=decode(task),sourceKey=taskData.sourceKey||window.CT_CONTENT.tasks.find(x=>x.kk.title===taskData.title)?.sourceKey;let details={};try{details=JSON.parse(old?decode(old).detailsJson:'{}');}catch{}
   const engine=window.CT_CONCLUSION,quiz=engine.answer(sourceKey,details.quiz,p.question,p.choice);
   const fields=engine.fields(sourceKey,quiz),obj={id:id+':INK',userId:profile.id,__ownerId:profile.id,attemptId:id,kind:'stage',step:'INK',detailsJson:JSON.stringify({...details,legacyFields:details.legacyFields||(!details.quiz&&details.fields?.some(Boolean)?details.fields:undefined),legacyResponse:details.legacyResponse||(!details.quiz&&stepDoc?decode(stepDoc).response:undefined),fields,quiz,sourceKey,flowVersion:4}),updatedAt:new Date().toISOString()};
-  const writes=[documentWrite(eName,obj,old)];if(engine.results(sourceKey,quiz).complete)writes.push(documentWrite(sName,{attemptId:id,stepCode:'INK',modelVersion:5,response:fields.join('\n\n'),score:'',feedback:'',updatedAt:new Date().toISOString(),__ownerId:profile.id},stepDoc));
+  const writes=[documentWrite(eName,obj,old)];if(engine.results(sourceKey,quiz).complete)writes.push(documentWrite(sName,{attemptId:id,stepCode:'INK',modelVersion:5,response:fields.join('\n\n'),score:stepDoc?decode(stepDoc).score??'':'',feedback:stepDoc?decode(stepDoc).feedback??'':'',updatedAt:new Date().toISOString(),__ownerId:profile.id},stepDoc));
   await commit(writes);return {evidence:obj,quiz,results:engine.results(sourceKey,quiz)};
  }
 
