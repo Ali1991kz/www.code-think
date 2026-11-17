@@ -1,6 +1,7 @@
 'use strict';
 const {test}=require('node:test'),assert=require('node:assert/strict'),fs=require('node:fs'),vm=require('node:vm'),path=require('node:path'),{makeUI}=require('./helpers/study-ui.cjs');
 const w={},c=vm.createContext({window:w});for(const f of ['content.js','conclusion-bank.js','conclusion-engine.js'])vm.runInContext(fs.readFileSync(path.join(__dirname,'..',f),'utf8'),c);
+test('all entrypoints request a fresh conclusion stylesheet when reactivating the quiz',()=>{for(const f of ['index.html','new-project/index.html','demo.html'])assert.match(fs.readFileSync(path.join(__dirname,'..',f),'utf8'),/conclusion.css\?v=12\.10\.0/);});
 test('31 canonical tasks have 62 bilingual questions, valid unique choices and explanations',()=>{
  assert.equal(w.CT_CONTENT.tasks.length,31);assert.equal(Object.keys(w.CT_CONCLUSION_BANK).length,31);
  for(const task of w.CT_CONTENT.tasks){const b=w.CT_CONCLUSION.bank(task.sourceKey);assert.equal(b.questions.length,2,task.sourceKey);for(const q of b.questions){assert.ok(Number.isInteger(q.answer));for(const lang of ['kk','ru']){const d=q[lang];assert.ok(d.prompt&&d.explanation);assert.equal(d.options.length,3);assert.equal(new Set(d.options).size,3);assert.ok(q.answer>=0&&q.answer<d.options.length);}}}
